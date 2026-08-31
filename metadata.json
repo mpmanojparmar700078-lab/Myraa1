@@ -1,0 +1,7 @@
+{
+  "name": "Myra",
+  "description": "A persistent AI assistant for Android with intent parsing, local memory, background orchestration, and app launcher capabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
