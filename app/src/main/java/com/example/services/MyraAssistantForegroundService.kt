@@ -91,6 +91,8 @@ class MyraAssistantForegroundService : Service() {
             AssistantState.PROCESSING -> "सोच रही हूँ… (Analyzing intent)"
             AssistantState.EXECUTING_ACTION -> detail ?: "एक्शन चल रहा है (Executing action)"
             AssistantState.BACKGROUND_READY -> "बैकग्राउंड में तैयार (Active in background)"
+            AssistantState.CANCELLING -> "रद्द हो रहा है (Cancelling request…)"
+            AssistantState.CANCELLED -> "रद्द किया गया (Request cancelled)"
             AssistantState.ERROR -> "त्रुटि (Error in action)"
         }
         updateNotification(text)

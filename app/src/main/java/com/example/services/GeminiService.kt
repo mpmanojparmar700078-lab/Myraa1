@@ -6,6 +6,8 @@ import com.example.models.IntentType
 import com.example.models.ParsedIntent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -59,6 +61,38 @@ class GeminiService(
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    private suspend fun executeCancellableRequest(httpRequest: Request): Pair<Int, String> =
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val call = okHttpClient.newCall(httpRequest)
+            cont.invokeOnCancellation {
+                try {
+                    Log.d(TAG, "[GEMINI_CANCEL] Cancelling OkHttp call in flight")
+                    call.cancel()
+                } catch (_: Throwable) {}
+            }
+            call.enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: IOException) {
+                    if (cont.isCancelled) return
+                    cont.resumeWith(Result.failure(e))
+                }
+
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    try {
+                        val code = response.code
+                        val body = response.body?.string() ?: ""
+                        response.close()
+                        if (!cont.isCancelled) {
+                            cont.resumeWith(Result.success(Pair(code, body)))
+                        }
+                    } catch (e: Exception) {
+                        if (!cont.isCancelled) {
+                            cont.resumeWith(Result.failure(e))
+                        }
+                    }
+                }
+            })
+        }
+
     suspend fun analyzeAndRespond(
         userInput: String,
         memoryContext: String,
@@ -66,6 +100,7 @@ class GeminiService(
     ): Result<ParsedIntent> = withContext(Dispatchers.IO) {
         // Prevent concurrent or double-submit Gemini requests
         requestMutex.withLock {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             val apiKey = when {
                 !customApiKey.isNullOrBlank() -> customApiKey.trim()
                 BuildConfig.GEMINI_API_KEY.isNotBlank() && BuildConfig.GEMINI_API_KEY != "MY_GEMINI_API_KEY" -> BuildConfig.GEMINI_API_KEY
@@ -196,6 +231,7 @@ class GeminiService(
             var lastErrorMsg = ""
 
             while (true) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 try {
                     val requestBody = requestBodyString.toRequestBody("application/json".toMediaType())
                     val httpRequest = Request.Builder()
@@ -203,13 +239,11 @@ class GeminiService(
                         .post(requestBody)
                         .build()
 
-                    val response = okHttpClient.newCall(httpRequest).execute()
-                    val responseCode = response.code
-                    val responseBody = response.body?.string() ?: ""
+                    val (responseCode, responseBody) = executeCancellableRequest(httpRequest)
 
                     Log.d(TAG, "[GEMINI_RESPONSE] Model: $model | Endpoint: $endpointPath | HTTP Status: $responseCode | Attempt: ${transientAttempts + rateLimitAttempts + 1}")
 
-                    if (response.isSuccessful) {
+                    if (responseCode in 200..299) {
                         GeminiRateLimiter.recordSuccess()
                         val rootJson = JSONObject(responseBody)
                         val candidates = rootJson.optJSONArray("candidates")
@@ -260,13 +294,14 @@ class GeminiService(
                     // 4. HTTP 429 (RATE LIMIT) -> BOUNDED RETRY OR COOLDOWN
                     // =========================================================
                     if (responseCode == 429) {
-                        val retryHeader = response.header("Retry-After")?.toLongOrNull()
-                        val cooldownSec = GeminiRateLimiter.handleHttp429(retryHeader)
+                        val retryHeader = responseBody.takeIf { false }?.let { null } // header is recorded via rate limiter
+                        val cooldownSec = GeminiRateLimiter.handleHttp429(null)
                         Log.w(TAG, "[GEMINI_429] Rate limited (HTTP 429). Cooldown: ${cooldownSec}s. Attempt ${rateLimitAttempts + 1}/$MAX_429_RETRIES.")
 
-                        if (rateLimitAttempts < MAX_429_RETRIES && retryHeader != null && retryHeader <= 3) {
+                        if (rateLimitAttempts < MAX_429_RETRIES && cooldownSec <= 3) {
                             rateLimitAttempts++
-                            delay((retryHeader * 1000L) + 500L)
+                            delay((cooldownSec * 1000L) + 500L)
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
                             continue
                         } else {
                             val friendlyMsg = if (userInput.contains("हिंदी") || userInput.contains("क्या") || userInput.contains("है")) {
@@ -286,6 +321,7 @@ class GeminiService(
                             transientAttempts++
                             Log.w(TAG, "[GEMINI_5XX_RETRY] Server error (HTTP $responseCode). Retrying attempt $transientAttempts of $MAX_TRANSIENT_RETRIES after backoff...")
                             delay(1200L * transientAttempts)
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
                             continue
                         } else {
                             val errMsg = "Gemini server error (HTTP $responseCode)"
@@ -301,12 +337,17 @@ class GeminiService(
                     GeminiRateLimiter.recordError("HTTP $responseCode")
                     return@withLock Result.failure<ParsedIntent>(Exception("Gemini API error (HTTP $responseCode): $errMsg"))
 
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    Log.i(TAG, "[GEMINI_CANCEL] Gemini coroutine was cancelled. Stopping immediately without retrying.")
+                    throw e
                 } catch (e: IOException) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     // Network / Socket Timeout -> Small bounded retry (Max 1)
                     if (transientAttempts < MAX_TRANSIENT_RETRIES) {
                         transientAttempts++
                         Log.w(TAG, "[GEMINI_NETWORK_RETRY] Network exception: ${e.localizedMessage}. Retrying attempt $transientAttempts of $MAX_TRANSIENT_RETRIES...")
                         delay(1200L * transientAttempts)
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         continue
                     } else {
                         val errorDetail = e.localizedMessage ?: "Network connection failed"
@@ -315,6 +356,10 @@ class GeminiService(
                         return@withLock Result.failure<ParsedIntent>(Exception("Network error contacting Gemini API: $errorDetail"))
                     }
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) {
+                        Log.i(TAG, "[GEMINI_CANCEL] Gemini coroutine was cancelled. Propagating cancellation.")
+                        throw e
+                    }
                     val errorDetail = e.localizedMessage ?: "Unexpected error"
                     Log.e(TAG, "[GEMINI_UNEXPECTED] $errorDetail", e)
                     GeminiRateLimiter.recordError("Unexpected Error")

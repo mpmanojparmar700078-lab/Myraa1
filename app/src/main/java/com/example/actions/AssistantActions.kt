@@ -11,6 +11,7 @@ import com.example.models.ParsedIntent
 import com.example.platform.android.AppLauncher
 import com.example.services.ScreenControlEngine
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 typealias ICommandAction = AssistantAction
 
@@ -347,6 +348,10 @@ class ActionManager(
                 )
             )
 
+            if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
+                break
+            }
+
             val actionHandler = actions[stepIntent.type]
             val stepResult = if (actionHandler != null) {
                 try {
@@ -367,6 +372,7 @@ class ActionManager(
                     }
                     actionHandler.execute(stepIntent, context, memoryRepository, adaptedProgress)
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     ActionResult(
                         success = false,
                         message = "Step $stepNumber failed: ${e.localizedMessage}",

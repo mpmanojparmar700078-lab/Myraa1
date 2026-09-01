@@ -45,53 +45,53 @@ class LocalCommandParser {
         val clearChatResult = parseClearChat(lower)
         if (clearChatResult != null) return clearChatResult
 
-        // 2. Language / Memory Preferences
+        // 2. Greetings & Conversational Small Talk (Level 1 Deterministic - Instant 0ms response)
+        val greetingResult = parseGreetings(lower)
+        if (greetingResult != null) return greetingResult
+
+        // 3. Language / Memory Preferences
         val preferenceResult = parsePreferences(cleanedInput, lower)
         if (preferenceResult != null) return preferenceResult
 
-        // 3. Context Queries (e.g. "kya tumhe pta hai maine kiski website open karne bola tha?", "maine abhi kya search karne bola tha?")
+        // 4. Context Queries (e.g. "kya tumhe pta hai maine kiski website open karne bola tha?", "maine abhi kya search karne bola tha?")
         val contextQueryResult = parseContextQuery(cleanedInput, lower)
         if (contextQueryResult != null) return contextQueryResult
 
-        // 4. Website / Link Commands with Pronoun or Entity Priority (e.g. "iski official website kholo", "Free Fire Craftland ki website kholo")
+        // 5. Website / Link Commands with Pronoun or Entity Priority (e.g. "iski official website kholo", "Free Fire Craftland ki website kholo")
         val websiteResult = parseWebsiteIntent(cleanedInput, lower)
         if (websiteResult != null) return websiteResult
 
-        // 5. Multi-Step Compound Commands (e.g., "Open YouTube and search for Free Fire")
+        // 6. Multi-Step Compound Commands (e.g., "Open YouTube and search for Free Fire")
         val multiStepResult = parseMultiStepCommands(cleanedInput, lower)
         if (multiStepResult != null) return multiStepResult
 
-        // 6. YouTube Dedicated Search & Play (V3.3 Intelligent Video Play)
+        // 7. YouTube Dedicated Search & Play (V3.3 Intelligent Video Play)
         val youtubeSearchPlayResult = parseYouTubeSearchAndPlay(cleanedInput, lower)
         if (youtubeSearchPlayResult != null) return youtubeSearchPlayResult
 
-        // 6b. Follow-Up Task Continuation (V3.3 Context: "अब इसे play करो", "play भी करो", "ab play kro", "isko play kro")
+        // 7b. Follow-Up Task Continuation (V3.3 Context: "अब इसे play करो", "play भी करो", "ab play kro", "isko play kro")
         val followUpResult = parseFollowUpCommand(cleanedInput, lower)
         if (followUpResult != null) return followUpResult
 
-        // 7. YouTube Dedicated Searches (e.g., "YouTube पर song search करो", "VK Bhuriya का song search करो YouTube पर")
+        // 8. YouTube Dedicated Searches (e.g., "YouTube पर song search करो", "VK Bhuriya का song search करो YouTube पर")
         val youtubeSearchResult = parseYouTubeSearch(cleanedInput, lower)
         if (youtubeSearchResult != null) return youtubeSearchResult
 
-        // 8. Google / Web Searches (e.g., "Google पर Free Fire search करो", "Search Free Fire on Google")
+        // 9. Google / Web Searches (e.g., "Google पर Free Fire search करो", "Search Free Fire on Google")
         val webSearchResult = parseWebSearch(cleanedInput, lower)
         if (webSearchResult != null) return webSearchResult
 
-        // 9. Navigation (Back / Home)
+        // 10. Navigation (Back / Home)
         val navigationResult = parseNavigation(lower)
         if (navigationResult != null) return navigationResult
 
-        // 10. URLs ("https://...", "open www...")
+        // 11. URLs ("https://...", "open www...")
         val urlResult = parseUrl(cleanedInput, lower)
         if (urlResult != null) return urlResult
 
-        // 11. Named Apps & Generic App Launches ("YouTube खोलो", "Open Chrome", "Settings खोलो", etc.)
+        // 12. Named Apps & Generic App Launches ("YouTube खोलो", "Open Chrome", "Settings खोलो", etc.)
         val appResult = parseAppLaunch(cleanedInput, lower)
         if (appResult != null) return appResult
-
-        // 12. Greetings
-        val greetingResult = parseGreetings(lower)
-        if (greetingResult != null) return greetingResult
 
         // Not recognized by local engine -> Will be delegated to Gemini Level 2 Engine
         return LocalCommandResult(
@@ -462,15 +462,55 @@ class LocalCommandParser {
     }
 
     private fun parseGreetings(lower: String): LocalCommandResult? {
+        val trimmed = lower.trim().replace(Regex("""[!.?,~]+$"""), "").trim()
+
+        // 1. Repetitive hi/hey/hello regex variations (e.g., "hii", "hiii", "heyy", "helloo", "hlo", "hlw", "hyy")
+        val isHiVariation = trimmed.matches(Regex("""^h+i+[i!]*$""")) || // hi, hii, hiii, hiiii
+                trimmed.matches(Regex("""^h+e+y+[y!]*$""")) || // hey, heyy, heyyy
+                trimmed.matches(Regex("""^h+e+l+l*o+[o!]*$""")) || // hello, helloo, helo, hellooo
+                trimmed.matches(Regex("""^h+l+o+[o!]*$""")) || // hlo, hloo
+                trimmed.matches(Regex("""^h+l+w+[w!]*$""")) || // hlw, hlww
+                trimmed.matches(Regex("""^h+y+[y!]*$""")) || // hy, hyy, hyyy
+                trimmed.matches(Regex("""^yo+[o!]*$""")) || // yo, yoo
+                trimmed.matches(Regex("""^hola+[a!]*$""")) // hola
+
+        // 2. Direct greeting triggers
         val greetingTriggers = setOf(
-            "hello", "hi", "hey", "hello myra", "hi myra", "hey myra",
-            "नमस्ते", "नमस्ते मायरा", "नमस्कार", "namaste", "namaste myra", "good morning", "good evening"
+            "hello", "hi", "hey", "hello myra", "hi myra", "hey myra", "hiii", "hii", "heyy",
+            "नमस्ते", "नमस्ते मायरा", "नमस्कार", "namaste", "namaste myra", "good morning", "good evening",
+            "good afternoon", "good night", "shubh ratri", "shubh prabhat", "सुप्रभात", "शुभ रात्रि",
+            "राम राम", "जय श्री राम", "राधे राधे", "radhe radhe", "ram ram", "jai shree ram"
         )
-        if (greetingTriggers.contains(lower)) {
-            val reply = if (lower.contains("नमस्ते") || lower.contains("नमस्कार") || lower.contains("namaste")) {
-                "नमस्ते! मैं मायरा हूँ, आपकी निजी AI असिस्टेंट। मैं ऐप्स खोल सकती हूँ, YouTube और Web Search कर सकती हूँ। बताइए, क्या मदद करूँ?"
+
+        // 3. Well-being triggers
+        val wellbeingTriggers = setOf(
+            "kaise ho", "kese ho", "kaise ho myra", "kese ho myra", "kya haal hai", "kya haal h",
+            "kya chal raha hai", "how are you", "how are you myra", "how r u", "whats up", "what's up",
+            "wassup", "sup", "sab theek", "sab badiya", "all good"
+        )
+
+        // 4. Identity / Capabilities triggers
+        val identityTriggers = setOf(
+            "who are you", "who are you myra", "who r u", "tum kaun ho", "aap kaun ho", "ap kon ho",
+            "tum kon ho", "myra kaun hai", "myra kon hai", "what can you do", "kya kar sakti ho",
+            "tum kya kar sakti ho", "aap kya kar sakti ho", "introduce yourself", "apna intro do"
+        )
+
+        // 5. Thanks / Appreciation triggers
+        val thanksTriggers = setOf(
+            "thank you", "thanks", "dhanyawad", "shukriya", "thank u", "thx", "thank you myra",
+            "धन्यवाद", "शुक्रिया"
+        )
+
+        val isGreeting = isHiVariation || greetingTriggers.contains(trimmed) ||
+                trimmed.startsWith("hi myra") || trimmed.startsWith("hello myra") || trimmed.startsWith("hey myra") ||
+                trimmed.startsWith("namaste myra") || trimmed.startsWith("नमस्ते मायरा")
+
+        if (isGreeting) {
+            val reply = if (trimmed.contains("नमस्ते") || trimmed.contains("नमस्कार") || trimmed.contains("namaste") || trimmed.contains("राम") || trimmed.contains("राधे")) {
+                "नमस्ते! मैं Myra हूँ, आपकी निजी AI असिस्टेंट। मैं ऐप्स खोल सकती हूँ, YouTube पर वीडियो खोज और चला सकती हूँ, और वेब सर्च कर सकती हूँ। बताइए, आज क्या मदद करूँ?"
             } else {
-                "Hello! I am Myra, your personal AI assistant. I can launch apps, search YouTube and the web. How can I assist you today?"
+                "Hello! I am Myra, your personal AI assistant. I can open apps, search and play YouTube videos, and search the web for you. How can I help you today?"
             }
             return LocalCommandResult(
                 recognized = true,
@@ -480,9 +520,64 @@ class LocalCommandParser {
                     responseText = reply
                 ),
                 confidence = 1.0f,
-                reason = "Local greeting match"
+                reason = "Local greeting match: $trimmed"
             )
         }
+
+        if (wellbeingTriggers.contains(trimmed) || trimmed.contains("how are you") || trimmed.contains("kaise ho") || trimmed.contains("kya haal")) {
+            val reply = if (trimmed.contains("kaise") || trimmed.contains("kese") || trimmed.contains("kya haal") || trimmed.contains("sab theek")) {
+                "मैं बिल्कुल ठीक हूँ! आपकी क्या मदद करूँ? आप कोई ऐप खोलने, YouTube वीडियो चलाने या सर्च करने के लिए कह सकते हैं।"
+            } else {
+                "I'm doing great! How can I help you today? You can ask me to open apps, play YouTube videos, or search the web."
+            }
+            return LocalCommandResult(
+                recognized = true,
+                intent = IntentType.GENERAL_CHAT,
+                parsedIntent = ParsedIntent(
+                    type = IntentType.GENERAL_CHAT,
+                    responseText = reply
+                ),
+                confidence = 1.0f,
+                reason = "Local well-being match: $trimmed"
+            )
+        }
+
+        if (identityTriggers.contains(trimmed) || trimmed.contains("who are you") || trimmed.contains("tum kaun ho") || trimmed.contains("aap kaun ho")) {
+            val reply = if (trimmed.contains("tum") || trimmed.contains("aap") || trimmed.contains("kon") || trimmed.contains("kaun") || trimmed.contains("kya kar")) {
+                "मैं Myra हूँ — आपकी Android AI असिस्टेंट। मैं आपके फ़ोन में YouTube पर गाने या वीडियो चला सकती हूँ, कोई भी ऐप (जैसे WhatsApp, Camera, Chrome, Settings) खोल सकती हूँ और Google सर्च कर सकती हूँ।"
+            } else {
+                "I am Myra — your Android AI assistant. I can open apps, search and play YouTube videos, and search the web for you."
+            }
+            return LocalCommandResult(
+                recognized = true,
+                intent = IntentType.GENERAL_CHAT,
+                parsedIntent = ParsedIntent(
+                    type = IntentType.GENERAL_CHAT,
+                    responseText = reply
+                ),
+                confidence = 1.0f,
+                reason = "Local identity match: $trimmed"
+            )
+        }
+
+        if (thanksTriggers.contains(trimmed)) {
+            val reply = if (trimmed.contains("dhanyawad") || trimmed.contains("shukriya") || trimmed.contains("धन्यवाद") || trimmed.contains("शुक्रिया")) {
+                "आपका स्वागत है! अगर कोई और काम हो तो जरूर बताएं।"
+            } else {
+                "You're welcome! Let me know if there's anything else I can do for you."
+            }
+            return LocalCommandResult(
+                recognized = true,
+                intent = IntentType.GENERAL_CHAT,
+                parsedIntent = ParsedIntent(
+                    type = IntentType.GENERAL_CHAT,
+                    responseText = reply
+                ),
+                confidence = 1.0f,
+                reason = "Local appreciation match: $trimmed"
+            )
+        }
+
         return null
     }
 

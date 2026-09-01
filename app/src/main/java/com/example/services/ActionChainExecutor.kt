@@ -17,6 +17,7 @@ import com.example.models.TaskContext
 import com.example.models.VerificationRule
 import com.example.platform.android.AppLauncher
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -84,11 +85,14 @@ class ActionChainExecutor(
             var failureReason = ""
 
             for (index in 0 until chain.steps.size) {
-                if (isCancellationRequested || chain.isCancelled) {
+                if (isCancellationRequested || chain.isCancelled || !kotlinx.coroutines.currentCoroutineContext().isActive) {
                     Log.w(TAG, "[TASK] ActionChain cancelled by user at step $index")
                     chain.overallStatus = ChainActionStatus.CANCELLED
                     taskCtx.isCancelled = true
                     taskCtx.updatedAt = System.currentTimeMillis()
+                    for (remainingIdx in index until chain.steps.size) {
+                        chain.steps[remainingIdx].status = ChainActionStatus.CANCELLED
+                    }
                     return ActionResult(
                         success = false,
                         message = "टास्क रोक दिया गया है। (Task was cancelled)",
@@ -100,7 +104,7 @@ class ActionChainExecutor(
                 while (isPauseRequested || chain.isPaused) {
                     chain.overallStatus = ChainActionStatus.PAUSED
                     delay(300L)
-                    if (isCancellationRequested) break
+                    if (isCancellationRequested || !kotlinx.coroutines.currentCoroutineContext().isActive) break
                 }
 
                 chain.currentStepIndex = index
@@ -123,6 +127,19 @@ class ActionChainExecutor(
                 // Execute Step with Retry & Verification
                 val stepResult = executeStepWithRetry(step, index + 1, chain.totalSteps, taskCtx, onProgress)
                 executedStepResults.add(stepResult)
+
+                if (isCancellationRequested || chain.isCancelled || !kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    chain.overallStatus = ChainActionStatus.CANCELLED
+                    taskCtx.isCancelled = true
+                    for (remainingIdx in (index + 1) until chain.steps.size) {
+                        chain.steps[remainingIdx].status = ChainActionStatus.CANCELLED
+                    }
+                    return ActionResult(
+                        success = false,
+                        message = "टास्क रोक दिया गया है। (Task was cancelled)",
+                        stepResults = executedStepResults
+                    )
+                }
 
                 if (!stepResult.success && !step.isOptional) {
                     chainFailed = true
@@ -172,6 +189,10 @@ class ActionChainExecutor(
         var lastError = ""
 
         while (attempts < maxAttempts) {
+            if (isCancellationRequested || !kotlinx.coroutines.currentCoroutineContext().isActive) {
+                step.status = ChainActionStatus.CANCELLED
+                return ActionResult(success = false, message = "Step cancelled by user")
+            }
             attempts++
             step.retryCount = attempts - 1
             step.status = ChainActionStatus.RUNNING

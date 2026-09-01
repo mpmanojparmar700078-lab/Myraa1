@@ -751,6 +751,35 @@ class ExampleUnitTest {
         assertEquals(step1.id, chain.steps[1].dependsOnStepId)
         assertEquals(com.example.models.ChainActionStatus.FAILED, chain.steps[0].status)
     }
+
+    @Test
+    fun test_LocalGreetingsAndSmallTalk() {
+        val parser = LocalCommandParser()
+
+        val hiVariations = listOf("hii", "hiii", "hi", "heyy", "hey", "hello", "helloo", "hlo", "hlw", "hyy")
+        for (greeting in hiVariations) {
+            val result = parser.parse(greeting)
+            assertTrue("Greeting '$greeting' should be recognized locally", result.recognized)
+            assertEquals("Intent for '$greeting' should be GENERAL_CHAT", IntentType.GENERAL_CHAT, result.intent)
+            assertNotNull(result.parsedIntent?.responseText)
+        }
+
+        val conversationalQueries = listOf(
+            "kaise ho",
+            "kya haal hai",
+            "how are you",
+            "who are you",
+            "tum kaun ho",
+            "namaste",
+            "thank you"
+        )
+        for (query in conversationalQueries) {
+            val result = parser.parse(query)
+            assertTrue("Query '$query' should be recognized locally", result.recognized)
+            assertEquals("Intent for '$query' should be GENERAL_CHAT", IntentType.GENERAL_CHAT, result.intent)
+            assertNotNull(result.parsedIntent?.responseText)
+        }
+    }
 }
 
 

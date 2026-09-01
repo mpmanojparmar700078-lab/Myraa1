@@ -17,8 +17,12 @@ android {
     applicationId = "com.aistudio.myra.assistant"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = (project.findProperty("customVersionCode") as? String)?.toIntOrNull()
+      ?: (System.getenv("APP_VERSION_CODE")?.toIntOrNull())
+      ?: 1
+    versionName = (project.findProperty("customVersionName") as? String)
+      ?: System.getenv("APP_VERSION_NAME")
+      ?: "1.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
@@ -52,11 +53,13 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -305,7 +308,10 @@ fun AssistantScreen(
                 exit = fadeOut(tween(250)) + shrinkVertically(tween(250))
             ) {
                 currentActionProgress?.let { progress ->
-                    LiveActionProgressBanner(progress = progress)
+                    LiveActionProgressBanner(
+                        progress = progress,
+                        onCancel = { viewModel.cancelCurrentRequest() }
+                    )
                 }
             }
 
@@ -319,14 +325,20 @@ fun AssistantScreen(
                         inputText = ""
                     }
                 },
-                isProcessing = assistantState == AssistantState.PROCESSING || assistantState == AssistantState.EXECUTING_ACTION
+                onCancel = { viewModel.cancelCurrentRequest() },
+                isProcessing = assistantState == AssistantState.PROCESSING ||
+                        assistantState == AssistantState.EXECUTING_ACTION ||
+                        assistantState == AssistantState.CANCELLING
             )
         }
     }
 }
 
 @Composable
-fun LiveActionProgressBanner(progress: com.example.models.ActionProgressUpdate) {
+fun LiveActionProgressBanner(
+    progress: com.example.models.ActionProgressUpdate,
+    onCancel: () -> Unit
+) {
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
@@ -375,6 +387,20 @@ fun LiveActionProgressBanner(progress: com.example.models.ActionProgressUpdate) 
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                 )
             }
+
+            IconButton(
+                onClick = onCancel,
+                modifier = Modifier
+                    .size(32.dp)
+                    .testTag("cancel_action_progress_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Cancel Task",
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }
@@ -397,6 +423,7 @@ fun MyraOrbAvatar(state: AssistantState) {
         AssistantState.PROCESSING -> Color(0xFF673AB7)
         AssistantState.EXECUTING_ACTION -> Color(0xFF00BFA5)
         AssistantState.BACKGROUND_READY -> Color(0xFF0288D1)
+        AssistantState.CANCELLING, AssistantState.CANCELLED -> Color(0xFFFF9800)
         AssistantState.ERROR -> Color(0xFFE53935)
     }
 
@@ -429,6 +456,8 @@ fun AssistantStatusBadge(state: AssistantState) {
         AssistantState.PROCESSING -> Triple(Color(0xFFE8DEF8), Color(0xFF4A4458), "Thinking…")
         AssistantState.EXECUTING_ACTION -> Triple(Color(0xFFC8E6C9), Color(0xFF1B5E20), "Executing…")
         AssistantState.BACKGROUND_READY -> Triple(Color(0xFFB2EBF2), Color(0xFF006064), "Background")
+        AssistantState.CANCELLING -> Triple(Color(0xFFFFECB3), Color(0xFF795548), "Cancelling…")
+        AssistantState.CANCELLED -> Triple(Color(0xFFEEEEEE), Color(0xFF616161), "Cancelled")
         AssistantState.ERROR -> Triple(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, "Error")
     }
 
@@ -441,7 +470,7 @@ fun AssistantStatusBadge(state: AssistantState) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            if (state == AssistantState.PROCESSING || state == AssistantState.EXECUTING_ACTION) {
+            if (state == AssistantState.PROCESSING || state == AssistantState.EXECUTING_ACTION || state == AssistantState.CANCELLING) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(10.dp),
                     strokeWidth = 1.5.dp,
@@ -784,6 +813,7 @@ fun BottomCommandInput(
     text: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
+    onCancel: () -> Unit,
     isProcessing: Boolean
 ) {
     val focusManager = LocalFocusManager.current
@@ -815,7 +845,7 @@ fun BottomCommandInput(
                 onValueChange = onTextChange,
                 placeholder = {
                     Text(
-                        text = "Type a command… (e.g. YouTube खोलो)",
+                        text = if (isProcessing) "Request running… (tap Cancel or type new command)" else "Type a command… (e.g. YouTube खोलो)",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 },
@@ -832,24 +862,42 @@ fun BottomCommandInput(
                 )
             )
 
-            FilledIconButton(
-                onClick = handleSend,
-                enabled = text.isNotBlank() && !isProcessing,
-                shape = CircleShape,
-                modifier = Modifier
-                    .size(48.dp)
-                    .testTag("send_command_button"),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                if (isProcessing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
+            if (isProcessing) {
+                FilledTonalButton(
+                    onClick = onCancel,
+                    shape = RoundedCornerShape(24.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    ),
+                    modifier = Modifier
+                        .height(48.dp)
+                        .testTag("cancel_command_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Cancel Request",
+                        modifier = Modifier.size(16.dp)
                     )
-                } else {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Cancel",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                FilledIconButton(
+                    onClick = handleSend,
+                    enabled = text.isNotBlank(),
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("send_command_button"),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send Command"

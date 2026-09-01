@@ -1,0 +1,172 @@
+name: Build & Release Update-Compatible Myra APK
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Version Name (e.g. 1.0.1)'
+        required: false
+        default: ''
+      version_code:
+        description: 'Version Code override (leave empty to calculate automatically)'
+        required: false
+        default: ''
+      create_release:
+        description: 'Create GitHub Release (true/false)'
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: myra-build-release
+  cancel-in-progress: false
+
+jobs:
+  build-apk:
+    name: Build & Package Update-Compatible APK
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Calculate Version Information
+        id: versioning
+        run: |
+          # 1. Base Version Code Strategy:
+          # Uses GitHub run_number + base offset (e.g. 100) to ensure strictly increasing versionCode
+          # Or uses explicit user input if provided.
+          DEFAULT_BASE_OFFSET=100
+          AUTO_CODE=$(( GITHUB_RUN_NUMBER + DEFAULT_BASE_OFFSET ))
+          
+          INPUT_CODE="${{ github.event.inputs.version_code }}"
+          if [ -n "$INPUT_CODE" ]; then
+            FINAL_CODE="$INPUT_CODE"
+          else
+            FINAL_CODE="$AUTO_CODE"
+          fi
+
+          INPUT_NAME="${{ github.event.inputs.version_name }}"
+          if [ -n "$INPUT_NAME" ]; then
+            FINAL_NAME="$INPUT_NAME"
+          else
+            FINAL_NAME="1.0.${FINAL_CODE}"
+          fi
+
+          TAG_NAME="v${FINAL_NAME}"
+          APK_BASENAME="Myra-${TAG_NAME}"
+
+          echo "VERSION_CODE=${FINAL_CODE}" >> $GITHUB_ENV
+          echo "VERSION_NAME=${FINAL_NAME}" >> $GITHUB_ENV
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
+          echo "APK_BASENAME=${APK_BASENAME}" >> $GITHUB_ENV
+
+          echo "Calculated Version Code: ${FINAL_CODE}"
+          echo "Calculated Version Name: ${FINAL_NAME}"
+          echo "Release Tag: ${TAG_NAME}"
+          echo "APK Filename Base: ${APK_BASENAME}"
+
+      - name: Prepare Secrets & Environment Configuration
+        run: |
+          # Ensure .env exists securely for BuildConfig compilation without leaking keys
+          touch .env
+          if [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+          else
+            echo "GEMINI_API_KEY=MY_GEMINI_API_KEY" >> .env
+          fi
+
+      - name: Configure Release Signing Key
+        id: signing_check
+        run: |
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ] && [ -n "${{ secrets.RELEASE_KEYSTORE_PASSWORD }}" ] && [ -n "${{ secrets.RELEASE_KEY_PASSWORD }}" ]; then
+            echo "Release keystore secret is configured. Decoding keystore..."
+            echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > "${{ github.workspace }}/release-upload-key.jks"
+            echo "KEYSTORE_PATH=${{ github.workspace }}/release-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=${{ secrets.RELEASE_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}" >> $GITHUB_ENV
+            echo "SIGNING_MODE=RELEASE" >> $GITHUB_ENV
+          else
+            echo "NOTICE: RELEASE_KEYSTORE_BASE64 secret not found."
+            echo "Building with debug signing configuration as fallback. For permanent update compatibility on real devices, configure GitHub Secrets."
+            echo "SIGNING_MODE=DEBUG" >> $GITHUB_ENV
+          fi
+
+      - name: Build Android APK
+        env:
+          APP_VERSION_CODE: ${{ env.VERSION_CODE }}
+          APP_VERSION_NAME: ${{ env.VERSION_NAME }}
+        run: |
+          if [ "$SIGNING_MODE" = "RELEASE" ]; then
+            echo "Building Release APK..."
+            ./gradlew assembleRelease --no-daemon -PcustomVersionCode="${VERSION_CODE}" -PcustomVersionName="${VERSION_NAME}"
+            RAW_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          else
+            echo "Building Debug APK..."
+            ./gradlew assembleDebug --no-daemon -PcustomVersionCode="${VERSION_CODE}" -PcustomVersionName="${VERSION_NAME}"
+            RAW_APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          fi
+
+          if [ -z "$RAW_APK" ] || [ ! -f "$RAW_APK" ]; then
+            echo "ERROR: APK was not generated!"
+            exit 1
+          fi
+
+          mkdir -p output_apks
+          FINAL_APK_PATH="output_apks/${APK_BASENAME}.apk"
+          cp "$RAW_APK" "$FINAL_APK_PATH"
+          echo "FINAL_APK_PATH=${FINAL_APK_PATH}" >> $GITHUB_ENV
+          echo "Successfully packaged APK at: ${FINAL_APK_PATH}"
+
+      - name: Upload Versioned APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: myra-apk-${{ env.TAG_NAME }}
+          path: ${{ env.FINAL_APK_PATH }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Create Versioned GitHub Release (Preserving All Previous Releases)
+        if: ${{ github.event_name == 'push' || github.event.inputs.create_release == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Myra ${{ env.TAG_NAME }} (Build #${{ env.VERSION_CODE }})
+          body: |
+            ### 🤖 Myra Personal AI Assistant — ${{ env.TAG_NAME }}
+            
+            - **Application ID / Package:** `com.aistudio.myra.assistant`
+            - **Version Name:** `${{ env.VERSION_NAME }}`
+            - **Version Code:** `${{ env.VERSION_CODE }}`
+            - **Signing Mode:** `${{ env.SIGNING_MODE }}`
+            - **Update Compatibility:** Compatible with previously installed builds sharing this signing key and Application ID.
+            
+            #### 📦 Download
+            - **APK File:** `${{ env.APK_BASENAME }}.apk`
+            
+            *All previous releases and assets are permanently retained.*
+          files: ${{ env.FINAL_APK_PATH }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

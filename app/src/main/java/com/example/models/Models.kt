@@ -5,6 +5,8 @@ enum class AssistantState(val label: String, val descriptionHindi: String, val d
     PROCESSING("Processing", "सोच रही हूँ…", "Analyzing intent with AI…"),
     EXECUTING_ACTION("Executing Action", "एक्शन चला रही हूँ…", "Executing Android action…"),
     BACKGROUND_READY("Background Active", "बैकग्राउंड में सक्रिय", "Active in background"),
+    CANCELLING("Cancelling", "रद्द हो रहा है…", "Cancelling active task…"),
+    CANCELLED("Cancelled", "रद्द किया गया", "Request cancelled"),
     ERROR("Error", "त्रुटि (Error)", "Action or connection issue")
 }
 

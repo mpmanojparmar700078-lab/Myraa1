@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -86,28 +87,91 @@ class AssistantService(
     private val _currentActionProgress = MutableStateFlow<ActionProgressUpdate?>(null)
     val currentActionProgress = _currentActionProgress.asStateFlow()
 
+    private var currentRequestJob: kotlinx.coroutines.Job? = null
+    private val currentRequestId = java.util.concurrent.atomic.AtomicLong(0)
+    private var lastProcessedInput: String = ""
+    private var lastProcessedTime: Long = 0L
+
+    fun cancelCurrentRequest(reason: String = "User cancelled", notifyUser: Boolean = true) {
+        val activeJob = currentRequestJob
+        val wasRunning = activeJob?.isActive == true ||
+                _assistantState.value == AssistantState.PROCESSING ||
+                _assistantState.value == AssistantState.EXECUTING_ACTION
+
+        Log.w("AssistantService", "[CANCEL] cancelCurrentRequest called (wasRunning=$wasRunning, reason=$reason)")
+
+        // 1. Advance request ID so any ongoing operations ignore stale callbacks/results
+        val cancelledRequestId = currentRequestId.incrementAndGet()
+
+        // 2. Transition state to CANCELLING
+        _assistantState.value = AssistantState.CANCELLING
+
+        // 3. Cancel active Action Chain
+        actionChainExecutor.cancelCurrentChain()
+
+        // 4. Cancel active coroutine job (aborts Gemini call, OkHttp call, delay, or screen wait)
+        activeJob?.cancel(kotlinx.coroutines.CancellationException("Request cancelled: $reason"))
+        currentRequestJob = null
+        _currentActionProgress.value = null
+
+        // 5. If requested, notify user via conversational state and return to IDLE
+        if (notifyUser) {
+            _assistantState.value = AssistantState.CANCELLED
+            serviceScope.launch {
+                val cancelMsg = "Request cancel कर दिया गया।"
+                memoryRepository.saveAssistantResponse(
+                    text = cancelMsg,
+                    result = ActionResult(success = false, message = cancelMsg)
+                )
+                delay(1000L)
+                if (currentRequestId.get() == cancelledRequestId) {
+                    _assistantState.value = AssistantState.IDLE
+                }
+            }
+        } else {
+            _assistantState.value = AssistantState.IDLE
+        }
+    }
+
     fun processCommand(input: String) {
         val trimmed = input.trim()
         if (trimmed.isBlank()) return
 
-        // Prevent accidental duplicate submission while already busy
-        if (_assistantState.value == AssistantState.PROCESSING || _assistantState.value == AssistantState.EXECUTING_ACTION) {
+        val now = System.currentTimeMillis()
+        // Duplicate request prevention: if identical input is sent within 600ms while running, ignore duplicate
+        if (trimmed.equals(lastProcessedInput, ignoreCase = true) && (now - lastProcessedTime < 600L) &&
+            (_assistantState.value == AssistantState.PROCESSING || _assistantState.value == AssistantState.EXECUTING_ACTION)) {
+            Log.w("AssistantService", "[DUPLICATE_PREVENTION] Ignored duplicate rapid submission: $trimmed")
             return
         }
 
-        serviceScope.launch {
+        lastProcessedInput = trimmed
+        lastProcessedTime = now
+
+        // Safe replacement policy for incoming command while another request is running:
+        // Cancel the previous active request cooperatively before starting the new request
+        if (currentRequestJob?.isActive == true ||
+            _assistantState.value == AssistantState.PROCESSING ||
+            _assistantState.value == AssistantState.EXECUTING_ACTION) {
+            Log.i("AssistantService", "[NEW_REQUEST_POLICY] Cancelling previous active request before starting new command: '$trimmed'")
+            cancelCurrentRequest(reason = "Replaced by new command: $trimmed", notifyUser = false)
+        }
+
+        val thisRequestId = currentRequestId.incrementAndGet()
+
+        currentRequestJob = serviceScope.launch {
             try {
                 // 1. Save user message to memory repository
                 memoryRepository.saveUserMessage(trimmed)
+                if (thisRequestId != currentRequestId.get() || !isActive) return@launch
+
                 _assistantState.value = AssistantState.PROCESSING
                 _currentActionProgress.value = null
 
-                // ====================================================================
-                // STRICT LOCAL-FIRST ROUTING HIERARCHY (0 GEMINI API CALLS FOR LOCAL)
-                // ====================================================================
-
                 // STEP 1: Full Local Engine Evaluation (Deterministic, Context, Device, Search, Multi-Action)
                 val localResult = localCommandParser.parse(trimmed)
+                if (thisRequestId != currentRequestId.get() || !isActive) return@launch
+
                 if (localResult.recognized && localResult.parsedIntent != null) {
                     val routingLevel = when (localResult.intent) {
                         IntentType.CLEAR_CHAT, IntentType.SET_PREFERENCE -> "LEVEL_1_DETERMINISTIC"
@@ -126,7 +190,8 @@ class AssistantService(
                     handleIntent(
                         intent = localResult.parsedIntent,
                         userQuery = trimmed,
-                        executionSource = routingLevel
+                        executionSource = routingLevel,
+                        requestId = thisRequestId
                     )
                     return@launch
                 }
@@ -134,6 +199,8 @@ class AssistantService(
                 // STEP 2: FINAL PRE-GEMINI SAFETY CHECK
                 // Fallback check on installed apps or search intents before calling Gemini
                 val preGeminiFallback = evaluatePreGeminiLocalFallback(trimmed)
+                if (thisRequestId != currentRequestId.get() || !isActive) return@launch
+
                 if (preGeminiFallback != null && preGeminiFallback.recognized && preGeminiFallback.parsedIntent != null) {
                     ApiUsageTracker.recordLocalExecution(
                         level = "LEVEL_FINAL_LOCAL_SAFETY_CHECK",
@@ -143,14 +210,13 @@ class AssistantService(
                     handleIntent(
                         intent = preGeminiFallback.parsedIntent,
                         userQuery = trimmed,
-                        executionSource = "LEVEL_FINAL_LOCAL_SAFETY_CHECK"
+                        executionSource = "LEVEL_FINAL_LOCAL_SAFETY_CHECK",
+                        requestId = thisRequestId
                     )
                     return@launch
                 }
 
-                // ====================================================================
                 // LEVEL 5 — GEMINI AI ENGINE (Fallback ONLY when local is insufficient)
-                // ====================================================================
                 ApiUsageTracker.recordGeminiExecution(
                     reason = localResult.reason.takeIf { it.isNotBlank() } ?: "Natural language reasoning required"
                 )
@@ -158,31 +224,53 @@ class AssistantService(
                 val memoryContext = memoryRepository.buildMemoryContextString()
                 val customApiKey = memoryRepository.getCustomApiKey()
 
+                if (thisRequestId != currentRequestId.get() || !isActive) return@launch
+
                 val analysisResult = geminiService.analyzeAndRespond(
                     userInput = trimmed,
                     memoryContext = memoryContext,
                     customApiKey = customApiKey
                 )
 
+                if (thisRequestId != currentRequestId.get() || !isActive) return@launch
+
                 if (analysisResult.isSuccess) {
                     val intent = analysisResult.getOrThrow()
                     handleIntent(
                         intent = intent,
                         userQuery = trimmed,
-                        executionSource = "LEVEL_5_GEMINI_FALLBACK"
+                        executionSource = "LEVEL_5_GEMINI_FALLBACK",
+                        requestId = thisRequestId
                     )
                 } else {
                     val error = analysisResult.exceptionOrNull()
                     handleError(
                         userQuery = trimmed,
-                        errorMessage = error?.localizedMessage ?: "Unknown error"
+                        errorMessage = error?.localizedMessage ?: "Unknown error",
+                        requestId = thisRequestId
                     )
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.i("AssistantService", "[CANCEL] Request #$thisRequestId was cancelled cleanly.")
+                if (thisRequestId == currentRequestId.get()) {
+                    _assistantState.value = AssistantState.CANCELLED
+                    _currentActionProgress.value = null
+                    serviceScope.launch {
+                        delay(800L)
+                        if (thisRequestId == currentRequestId.get()) {
+                            _assistantState.value = AssistantState.IDLE
+                        }
+                    }
+                }
             } catch (e: Exception) {
-                handleError(
-                    userQuery = trimmed,
-                    errorMessage = e.localizedMessage ?: "Processing failed"
-                )
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (thisRequestId == currentRequestId.get()) {
+                    handleError(
+                        userQuery = trimmed,
+                        errorMessage = e.localizedMessage ?: "Processing failed",
+                        requestId = thisRequestId
+                    )
+                }
             }
         }
     }
@@ -245,8 +333,14 @@ class AssistantService(
     private suspend fun handleIntent(
         intent: ParsedIntent,
         userQuery: String,
-        executionSource: String
+        executionSource: String,
+        requestId: Long = currentRequestId.get()
     ) {
+        if (requestId != currentRequestId.get() || !kotlinx.coroutines.currentCoroutineContext().isActive) {
+            Log.w("AssistantService", "[STALE_RESULT_DISCARD] Discarding handleIntent for stale request #$requestId (current: ${currentRequestId.get()})")
+            return
+        }
+
         val activeContext = ConversationContextTracker.getActiveContext()
         val contextEntity = activeContext?.effectiveEntity
         val contextTopic = activeContext?.activeTopicEntity ?: activeContext?.platform
@@ -259,9 +353,17 @@ class AssistantService(
                     actionList = intent.actions,
                     context = context,
                     onProgress = { progress ->
-                        _currentActionProgress.value = progress
+                        if (requestId == currentRequestId.get()) {
+                            _currentActionProgress.value = progress
+                        }
                     }
                 )
+
+                if (requestId != currentRequestId.get() || !kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    Log.w("AssistantService", "[STALE_RESULT_DISCARD] Discarding multi-action result for stale request #$requestId")
+                    return
+                }
+
                 _lastActionResult.value = actionResult
 
                 val replyText = intent.responseText ?: actionResult.message
@@ -283,7 +385,9 @@ class AssistantService(
                 _assistantState.value = AssistantState.IDLE
                 serviceScope.launch {
                     delay(800L)
-                    _currentActionProgress.value = null
+                    if (requestId == currentRequestId.get()) {
+                        _currentActionProgress.value = null
+                    }
                 }
             }
 
@@ -302,9 +406,17 @@ class AssistantService(
                     intent = intent,
                     context = context,
                     onProgress = { progress ->
-                        _currentActionProgress.value = progress
+                        if (requestId == currentRequestId.get()) {
+                            _currentActionProgress.value = progress
+                        }
                     }
                 )
+
+                if (requestId != currentRequestId.get() || !kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    Log.w("AssistantService", "[STALE_RESULT_DISCARD] Discarding action result for stale request #$requestId")
+                    return
+                }
+
                 _lastActionResult.value = actionResult
 
                 val replyText = if (!actionResult.success) {
@@ -333,12 +445,19 @@ class AssistantService(
                 _assistantState.value = AssistantState.IDLE
                 serviceScope.launch {
                     delay(800L)
-                    _currentActionProgress.value = null
+                    if (requestId == currentRequestId.get()) {
+                        _currentActionProgress.value = null
+                    }
                 }
             }
 
             IntentType.GENERAL_CHAT,
             IntentType.UNKNOWN -> {
+                if (requestId != currentRequestId.get() || !kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    Log.w("AssistantService", "[STALE_RESULT_DISCARD] Discarding chat result for stale request #$requestId")
+                    return
+                }
+
                 val replyText = intent.responseText ?: "मायरा तैयार है। बताइए क्या करना है?"
                 val result = ActionResult(success = true, message = replyText)
                 memoryRepository.saveAssistantResponse(
@@ -360,7 +479,16 @@ class AssistantService(
         }
     }
 
-    private suspend fun handleError(userQuery: String, errorMessage: String) {
+    private suspend fun handleError(
+        userQuery: String,
+        errorMessage: String,
+        requestId: Long = currentRequestId.get()
+    ) {
+        if (requestId != currentRequestId.get() || !kotlinx.coroutines.currentCoroutineContext().isActive) {
+            Log.w("AssistantService", "[STALE_RESULT_DISCARD] Discarding error handling for stale request #$requestId")
+            return
+        }
+
         _assistantState.value = AssistantState.ERROR
         _currentActionProgress.value = null
 
@@ -381,9 +509,7 @@ class AssistantService(
     }
 
     fun cancelActiveTask() {
-        actionChainExecutor.cancelCurrentChain()
-        _assistantState.value = AssistantState.IDLE
-        _currentActionProgress.value = null
+        cancelCurrentRequest(reason = "cancelActiveTask", notifyUser = true)
     }
 
     fun pauseActiveTask() {

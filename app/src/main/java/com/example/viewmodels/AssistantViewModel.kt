@@ -91,6 +91,10 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         assistantService.processCommand(input)
     }
 
+    fun cancelCurrentRequest() {
+        assistantService.cancelCurrentRequest(notifyUser = true)
+    }
+
     fun clearChatHistory() {
         viewModelScope.launch {
             memoryRepository.clearHistory()
