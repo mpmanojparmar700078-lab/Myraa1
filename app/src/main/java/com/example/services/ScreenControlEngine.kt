@@ -13,7 +13,9 @@ import com.example.models.UIElement
 import com.example.models.VideoCandidateType
 import com.example.models.YouTubeResultSelection
 import com.example.platform.android.AppLauncher
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Locale
@@ -53,22 +55,25 @@ class ScreenControlEngine(
     }
 
     /**
-     * Waits for a target package to appear in the foreground.
+     * Waits for a target package to appear in the foreground and the screen layout to settle.
      */
     suspend fun waitForPackage(
         expectedPackage: String,
-        maxRetries: Int = DEFAULT_RETRY_COUNT,
-        delayMs: Long = DEFAULT_RETRY_DELAY_MS
+        maxRetries: Int = 10,
+        delayMs: Long = 300L
     ): Boolean {
         val service = MyraAccessibilityService.getInstance() ?: return false
         logAction(expectedPackage, "WAIT_FOR_PACKAGE", expectedPackage, "WAITING")
 
         for (attempt in 1..maxRetries) {
+            if (!kotlinx.coroutines.currentCoroutineContext().isActive) return false
             val state = service.captureCurrentScreenState()
             val currentPkg = state.packageName ?: MyraAccessibilityService.currentActivePackage.value
 
             if (currentPkg != null && (currentPkg.equals(expectedPackage, ignoreCase = true) || currentPkg.contains(expectedPackage))) {
                 logAction(expectedPackage, "WAIT_FOR_PACKAGE", expectedPackage, "FOUND (attempt $attempt)")
+                // Allow screen hierarchy to settle
+                waitForScreenSettle(timeoutMs = 1200L)
                 return true
             }
             delay(delayMs)
@@ -76,6 +81,28 @@ class ScreenControlEngine(
 
         logAction(expectedPackage, "WAIT_FOR_PACKAGE", expectedPackage, "TIMEOUT ($maxRetries retries)")
         return false
+    }
+
+    /**
+     * Waits for screen content to stabilize (element hierarchy non-empty and steady).
+     */
+    suspend fun waitForScreenSettle(timeoutMs: Long = 2000L, minElements: Int = 1): Boolean {
+        val service = MyraAccessibilityService.getInstance() ?: return false
+        val startTime = System.currentTimeMillis()
+        var lastCount = -1
+
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            if (!kotlinx.coroutines.currentCoroutineContext().isActive) return false
+            val state = service.captureCurrentScreenState()
+            val currentCount = state.elements.size
+
+            if (currentCount >= minElements && currentCount == lastCount) {
+                return true
+            }
+            lastCount = currentCount
+            delay(200L)
+        }
+        return lastCount >= minElements
     }
 
     /**
@@ -89,26 +116,35 @@ class ScreenControlEngine(
     }
 
     /**
-     * Waits for an element matching the given matcher to appear on screen.
+     * Waits for an element matching the given matcher to appear on screen with adaptive polling and optional scroll fallback.
      */
     suspend fun waitForElement(
         appName: String,
         targetName: String,
         matcher: (UIElement) -> Boolean,
-        maxRetries: Int = DEFAULT_RETRY_COUNT,
-        delayMs: Long = DEFAULT_RETRY_DELAY_MS
+        maxRetries: Int = 10,
+        delayMs: Long = 300L,
+        allowScroll: Boolean = false
     ): UIElement? {
         val service = MyraAccessibilityService.getInstance() ?: return null
         logAction(appName, "FIND_ELEMENT", targetName, "SEARCHING")
 
         for (attempt in 1..maxRetries) {
+            if (!kotlinx.coroutines.currentCoroutineContext().isActive) return null
             val state = service.captureCurrentScreenState()
             val found = state.elements.firstOrNull(matcher)
             if (found != null) {
                 logAction(appName, "FIND_ELEMENT", targetName, "FOUND (${found.displayLabel})")
                 return found
             }
-            delay(delayMs)
+
+            // If not found after half attempts and scroll is allowed, gently scroll forward to reveal content
+            if (allowScroll && attempt == maxRetries / 2) {
+                service.scrollForward()
+                delay(300L)
+            } else {
+                delay(delayMs)
+            }
         }
 
         logAction(appName, "FIND_ELEMENT", targetName, "NOT_FOUND ($maxRetries attempts)")
@@ -116,12 +152,13 @@ class ScreenControlEngine(
     }
 
     /**
-     * Performs a deterministic CLICK on an element identified by matcher with post-click state verification.
+     * Performs a deterministic CLICK on an element identified by matcher with post-click state verification and gesture fallback.
      */
     suspend fun clickElement(
         appName: String,
         targetName: String,
-        matcher: (UIElement) -> Boolean
+        matcher: (UIElement) -> Boolean,
+        allowGestureFallback: Boolean = true
     ): ScreenActionStepResult {
         val service = MyraAccessibilityService.getInstance()
             ?: return ScreenActionStepResult(
@@ -131,7 +168,7 @@ class ScreenControlEngine(
 
         logAction(appName, "CLICK", targetName, "EXECUTING")
         val initialScreen = service.captureCurrentScreenState()
-        val result = service.clickElement(matcher)
+        val result = service.clickElement(matcher, allowGestureFallback = allowGestureFallback)
 
         if (!result.success) {
             logAction(appName, "CLICK", targetName, "FAILED (${result.message})")
@@ -141,8 +178,8 @@ class ScreenControlEngine(
             )
         }
 
-        // Brief wait for UI reaction
-        delay(300L)
+        // Wait for UI transition
+        delay(350L)
         val postScreen = service.captureCurrentScreenState()
         val changed = initialScreen.hasChangedSignificantly(postScreen)
 
@@ -157,7 +194,44 @@ class ScreenControlEngine(
     }
 
     /**
+     * Smart click finding element via text or description and executing click with fallback.
+     */
+    suspend fun smartFindAndClick(
+        targetDescription: String,
+        appName: String = "Active App",
+        timeoutMs: Long = 4000L
+    ): ScreenActionStepResult {
+        val service = MyraAccessibilityService.getInstance()
+            ?: return ScreenActionStepResult(
+                status = ScreenActionStatus.ACCESSIBILITY_PERMISSION_REQUIRED,
+                message = "Accessibility Service is not enabled."
+            )
+
+        val retries = (timeoutMs / 300L).toInt().coerceAtLeast(3)
+        logAction(appName, "SMART_CLICK", targetDescription, "LOCATING")
+
+        for (attempt in 1..retries) {
+            if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
+                return ScreenActionStepResult(status = ScreenActionStatus.FAILED, message = "Cancelled")
+            }
+            val state = service.captureCurrentScreenState()
+            val match = ElementMatcher.findBestMatch(state.elements, targetDescription)
+            if (match.isAcceptable && match.element != null) {
+                val el = match.element
+                return clickElement(appName, targetDescription, { it == el })
+            }
+            delay(300L)
+        }
+
+        return ScreenActionStepResult(
+            status = ScreenActionStatus.FAILED,
+            message = "Element '$targetDescription' could not be found on screen."
+        )
+    }
+
+    /**
      * Performs a deterministic SET_TEXT on an editable element with content verification.
+     * If the target is not editable directly (e.g. search trigger container), clicks it first to focus.
      */
     suspend fun setText(
         appName: String,
@@ -172,7 +246,20 @@ class ScreenControlEngine(
             )
 
         logAction(appName, "SET_TEXT", "$targetName -> \"$textToSet\"", "EXECUTING")
-        val result = service.setTextOnElement(matcher, textToSet)
+        val initialScreen = service.captureCurrentScreenState()
+        val targetEl = initialScreen.elements.firstOrNull(matcher)
+
+        // If matched element is not directly editable, click it first to open keyboard / focus field
+        if (targetEl != null && !targetEl.isEditable) {
+            service.clickElement({ it == targetEl })
+            delay(350L)
+        }
+
+        var result = service.setTextOnElement(matcher, textToSet)
+        if (!result.success) {
+            // Fallback: try any editable element on active screen
+            result = service.setTextOnElement({ it.isEditable }, textToSet)
+        }
 
         if (!result.success) {
             logAction(appName, "SET_TEXT", targetName, "FAILED (${result.message})")
@@ -194,6 +281,39 @@ class ScreenControlEngine(
             message = result.message,
             currentPackage = postState.packageName
         )
+    }
+
+    /**
+     * Smart Text entry with optional submit/search trigger.
+     */
+    suspend fun smartType(
+        appName: String,
+        targetName: String,
+        textToSet: String,
+        matcher: ((UIElement) -> Boolean)? = null,
+        submitAfter: Boolean = false
+    ): ScreenActionStepResult {
+        val chosenMatcher = matcher ?: ElementMatcher.forSearchInputField()
+        val setRes = setText(appName, targetName, textToSet, chosenMatcher)
+        if (setRes.status != ScreenActionStatus.SUCCESS) {
+            return setRes
+        }
+
+        if (submitAfter) {
+            delay(300L)
+            val searchTriggered = triggerSearch(appName)
+            if (searchTriggered.status != ScreenActionStatus.SUCCESS) {
+                // Fallback: click send or submit button if visible
+                val service = MyraAccessibilityService.getInstance()
+                val state = service?.captureCurrentScreenState()
+                val sendButton = state?.elements?.firstOrNull(ElementMatcher.forSendOrSubmitAction())
+                if (sendButton != null) {
+                    clickElement(appName, "Send/Submit Button", { it == sendButton })
+                }
+            }
+        }
+
+        return setRes
     }
 
     /**

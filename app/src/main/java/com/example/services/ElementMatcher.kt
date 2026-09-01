@@ -28,14 +28,16 @@ object ElementMatcher {
     )
 
     private val SYNONYM_DICTIONARY: Map<String, Set<String>> = mapOf(
-        "search" to setOf("search", "find", "query", "explore", "lookup", "खोजें", "सर्च", "ढूँढें", "ढूंढें", "search youtube", "type a search"),
-        "play" to setOf("play", "resume", "start", "चलाएं", "चालू करें", "प्ले", "बजाओ", "play video"),
+        "search" to setOf("search", "find", "query", "explore", "lookup", "खोजें", "सर्च", "ढूँढें", "ढूंढें", "search youtube", "type a search", "search or type web address"),
+        "play" to setOf("play", "resume", "start", "चलाएं", "चालू करें", "प्ले", "बजाओ", "play video", "play song", "watch"),
         "pause" to setOf("pause", "hold", "रोकें", "विराम", "pause video"),
         "clear" to setOf("clear", "delete", "erase", "remove", "reset", "हटाएं", "साफ़ करें", "मिटाएं", "clear query", "clear search"),
         "back" to setOf("back", "navigate up", "previous", "पीछे", "वापस"),
         "next" to setOf("next", "forward", "अगला", "आगे"),
-        "submit" to setOf("submit", "send", "done", "enter", "go", "search", "भेजें", "पूरा"),
-        "close" to setOf("close", "dismiss", "cancel", "बंद करें", "रद्द करें")
+        "submit" to setOf("submit", "send", "done", "enter", "go", "search", "confirm", "ok", "apply", "भेजें", "सेंड", "पूरा", "सर्च"),
+        "close" to setOf("close", "dismiss", "cancel", "बंद करें", "रद्द करें"),
+        "compose" to setOf("compose", "start chat", "new chat", "new message", "create", "new conversation", "start", "प्लस", "नया संदेश", "संदेश", "नया चैट", "chat", "message"),
+        "send" to setOf("send", "submit", "send message", "send sms", "done", "enter", "go", "confirm", "ok", "भेजें", "सेंड", "पोस्ट")
     )
 
     /**
@@ -390,5 +392,73 @@ object ElementMatcher {
             (descLower != null && (descLower == label || descLower.contains(label))) ||
             (viewIdLower != null && viewIdLower.contains(label))
         }
+    }
+
+    /**
+     * Generic matcher for Compose / Start Chat / New Message / Create buttons across apps.
+     */
+    fun forComposeOrNewAction(): (UIElement) -> Boolean = { element ->
+        val desc = element.contentDescription?.lowercase(Locale.ROOT) ?: ""
+        val text = element.text?.lowercase(Locale.ROOT) ?: ""
+        val viewId = element.viewId?.lowercase(Locale.ROOT) ?: ""
+
+        val isComposeKeyword = desc.contains("start chat") || desc.contains("new message") ||
+                desc.contains("compose") || desc.contains("create") || desc.contains("start conversation") ||
+                desc.contains("नया संदेश") || desc.contains("संदेश") || desc.contains("शुरू करें") ||
+                text.contains("start chat") || text.contains("compose") || text.contains("new message") ||
+                text.contains("नया चैट") || text.contains("संदेश") ||
+                viewId.contains("start_chat") || viewId.contains("fab") ||
+                viewId.contains("compose") || viewId.contains("create") || viewId.contains("action_new")
+
+        isComposeKeyword && (element.isClickable || element.isEnabled)
+    }
+
+    /**
+     * Generic matcher for Send / Submit / Confirm buttons across apps.
+     */
+    fun forSendOrSubmitAction(): (UIElement) -> Boolean = { element ->
+        val desc = element.contentDescription?.lowercase(Locale.ROOT) ?: ""
+        val text = element.text?.lowercase(Locale.ROOT) ?: ""
+        val viewId = element.viewId?.lowercase(Locale.ROOT) ?: ""
+
+        val isSendKeyword = desc.contains("send") || desc.contains("submit") || desc.contains("done") ||
+                desc.contains("भेजें") || desc.contains("सेंड") || desc.contains("post") ||
+                text.contains("send") || text.contains("submit") || text.contains("भेजें") ||
+                viewId.contains("send_button") || viewId.contains("btn_send") ||
+                viewId.contains("submit") || viewId.contains("action_send")
+
+        isSendKeyword && (element.isClickable || element.isEnabled)
+    }
+
+    /**
+     * Generic matcher for any Search button, search icon, or search bar trigger.
+     */
+    fun forAnySearchTrigger(): (UIElement) -> Boolean = { element ->
+        val desc = element.contentDescription?.lowercase(Locale.ROOT) ?: ""
+        val text = element.text?.lowercase(Locale.ROOT) ?: ""
+        val viewId = element.viewId?.lowercase(Locale.ROOT) ?: ""
+        val className = element.className?.lowercase(Locale.ROOT) ?: ""
+
+        val isSearch = desc.contains("search") || desc.contains("find") ||
+                desc.contains("खोजें") || desc.contains("सर्च") ||
+                text.contains("search") || text.contains("खोजें") ||
+                viewId.contains("search") || viewId.contains("query") ||
+                className.contains("search")
+
+        isSearch && (element.isClickable || element.isEditable || element.isEnabled)
+    }
+
+    /**
+     * Generic matcher for Play / Resume / Start video or audio button across apps.
+     */
+    fun forGenericPlayButton(): (UIElement) -> Boolean = { element ->
+        val desc = element.contentDescription?.lowercase(Locale.ROOT) ?: ""
+        val text = element.text?.lowercase(Locale.ROOT) ?: ""
+        val viewId = element.viewId?.lowercase(Locale.ROOT) ?: ""
+
+        (desc.contains("play") || text.contains("play") ||
+                desc.contains("चलाएं") || desc.contains("चालू करें") ||
+                viewId.contains("play") || viewId.contains("btn_play")) &&
+                !desc.contains("playlist") && !desc.contains("autoplay")
     }
 }

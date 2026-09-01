@@ -307,7 +307,12 @@ class ActionChainExecutor(
             ChainActionType.OPEN_APP -> {
                 val app = step.parameters["app"]?.toString() ?: step.target ?: "App"
                 taskCtx.currentApp = app
-                appLauncher.launchAppByName(app)
+                val launchRes = appLauncher.launchAppByName(app)
+                if (launchRes.success && screenControlEngine.isAccessibilityActive()) {
+                    // Wait for the app layout to settle
+                    screenControlEngine.waitForScreenSettle(timeoutMs = 1500L)
+                }
+                launchRes
             }
 
             ChainActionType.SEARCH -> {
@@ -322,6 +327,14 @@ class ActionChainExecutor(
                     } else {
                         appLauncher.searchYouTube(query)
                     }
+                } else if (screenControlEngine.isAccessibilityActive() && taskCtx.currentApp != null) {
+                    val res = screenControlEngine.smartType(
+                        appName = taskCtx.currentApp ?: "App",
+                        targetName = "Search",
+                        textToSet = query,
+                        submitAfter = true
+                    )
+                    ActionResult(res.status == ScreenActionStatus.SUCCESS, res.message)
                 } else {
                     appLauncher.performWebSearch(query)
                 }
@@ -338,6 +351,57 @@ class ActionChainExecutor(
                 }
             }
 
+            ChainActionType.CLICK -> {
+                val targetText = step.target ?: ""
+                if (screenControlEngine.isAccessibilityActive()) {
+                    val res = screenControlEngine.smartFindAndClick(
+                        targetDescription = targetText,
+                        appName = taskCtx.currentApp ?: "App"
+                    )
+                    ActionResult(res.status == ScreenActionStatus.SUCCESS, res.message)
+                } else {
+                    val service = MyraAccessibilityService.getInstance()
+                    if (service != null) {
+                        val screenState = readCurrentScreenState()
+                        val match = ElementMatcher.findBestMatch(screenState.elements, targetText)
+                        if (match.isAcceptable && match.element != null) {
+                            val clickRes = service.clickElement({ it == match.element })
+                            ActionResult(clickRes.success, clickRes.message)
+                        } else {
+                            ActionResult(false, "Element '$targetText' not found or ambiguous on screen")
+                        }
+                    } else {
+                        ActionResult(false, "Accessibility Service is not running")
+                    }
+                }
+            }
+
+            ChainActionType.TYPE_TEXT -> {
+                val textToType = step.parameters["text"]?.toString() ?: step.target ?: ""
+                val targetDesc = step.parameters["field"]?.toString() ?: step.target ?: "Text Field"
+                val submit = step.parameters["submit"] as? Boolean ?: false
+                if (screenControlEngine.isAccessibilityActive()) {
+                    val res = screenControlEngine.smartType(
+                        appName = taskCtx.currentApp ?: "App",
+                        targetName = targetDesc,
+                        textToSet = textToType,
+                        submitAfter = submit
+                    )
+                    ActionResult(res.status == ScreenActionStatus.SUCCESS, res.message)
+                } else {
+                    ActionResult(false, "Accessibility Service is not running to type text")
+                }
+            }
+
+            ChainActionType.SCROLL_DOWN -> {
+                if (screenControlEngine.isAccessibilityActive()) {
+                    val res = screenControlEngine.scrollForwardWithVerification(taskCtx.currentApp ?: "App")
+                    ActionResult(res.status == ScreenActionStatus.SUCCESS, res.message)
+                } else {
+                    ActionResult(false, "Accessibility Service is not running")
+                }
+            }
+
             ChainActionType.BACK -> {
                 val service = MyraAccessibilityService.getInstance()
                 if (service != null && MyraAccessibilityService.isAccessibilityServiceEnabled(context)) {
@@ -348,27 +412,25 @@ class ActionChainExecutor(
                 }
             }
 
+            ChainActionType.HOME -> {
+                val service = MyraAccessibilityService.getInstance()
+                if (service != null && MyraAccessibilityService.isAccessibilityServiceEnabled(context)) {
+                    val homeRes = service.performGlobalHome()
+                    ActionResult(homeRes.success, homeRes.message)
+                } else {
+                    ActionResult(true, "Navigated home")
+                }
+            }
+
             ChainActionType.WAIT -> {
                 val duration = (step.parameters["durationMs"] as? Number)?.toLong() ?: 1000L
                 delay(duration)
                 ActionResult(true, "Waited ${duration}ms")
             }
 
-            ChainActionType.CLICK -> {
-                val targetText = step.target ?: ""
-                val service = MyraAccessibilityService.getInstance()
-                if (service != null) {
-                    val screenState = readCurrentScreenState()
-                    val match = ElementMatcher.findBestMatch(screenState.elements, targetText)
-                    if (match.isAcceptable && match.element != null) {
-                        val clickRes = service.clickElement { it == match.element }
-                        ActionResult(clickRes.success, clickRes.message)
-                    } else {
-                        ActionResult(false, "Element '$targetText' not found or ambiguous on screen")
-                    }
-                } else {
-                    ActionResult(false, "Accessibility Service is not running")
-                }
+            ChainActionType.READ_SCREEN -> {
+                val content = screenControlEngine.readCurrentScreenContent()
+                ActionResult(true, content)
             }
 
             else -> {

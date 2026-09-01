@@ -186,21 +186,46 @@ class MyraAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Executes CLICK on a matching UI element.
+     * Executes CLICK on a matching UI element with coordinate gesture fallback if node action fails.
      */
-    fun clickElement(matcher: (UIElement) -> Boolean): AccessibilityActionResult {
+    fun clickElement(
+        matcher: (UIElement) -> Boolean,
+        allowGestureFallback: Boolean = true
+    ): AccessibilityActionResult {
         val root = rootInActiveWindow
-            ?: return AccessibilityActionResult(
-                success = false,
-                actionType = AccessibilityActionType.CLICK,
-                message = "No active window available to click"
-            )
+        if (root != null) {
+            val success = treeReader.performClick(root, matcher)
+            if (success) {
+                return AccessibilityActionResult(
+                    success = true,
+                    actionType = AccessibilityActionType.CLICK,
+                    message = "Click action performed successfully via accessibility node"
+                )
+            }
+        }
 
-        val success = treeReader.performClick(root, matcher)
+        // Gesture Tap Fallback: if node action failed but element exists with valid on-screen bounds
+        if (allowGestureFallback) {
+            val state = captureCurrentScreenState()
+            val matchedEl = state.elements.firstOrNull(matcher)
+            if (matchedEl != null && matchedEl.bounds.width() > 0 && matchedEl.bounds.height() > 0) {
+                val cx = matchedEl.bounds.centerX().toFloat()
+                val cy = matchedEl.bounds.centerY().toFloat()
+                val gestureDispatched = dispatchTapGesture(cx, cy)
+                if (gestureDispatched) {
+                    return AccessibilityActionResult(
+                        success = true,
+                        actionType = AccessibilityActionType.GESTURE_TAP,
+                        message = "Click action performed successfully via gesture tap at (${cx.toInt()}, ${cy.toInt()})"
+                    )
+                }
+            }
+        }
+
         return AccessibilityActionResult(
-            success = success,
+            success = false,
             actionType = AccessibilityActionType.CLICK,
-            message = if (success) "Click action performed successfully" else "Element not found or not clickable"
+            message = "Element not found or not clickable"
         )
     }
 
