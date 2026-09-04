@@ -262,10 +262,39 @@ class ClearChatAction : AssistantAction {
     }
 }
 
+class PublicApiAction(
+    private val apiToolRouter: com.example.apis.routing.ApiToolRouter? = null
+) : AssistantAction {
+    override val supportedType: IntentType = IntentType.PUBLIC_API
+
+    override suspend fun execute(
+        intent: ParsedIntent,
+        context: Context,
+        memoryRepository: MemoryRepository?,
+        onProgress: ((ActionProgressUpdate) -> Unit)?
+    ): ActionResult {
+        val router = apiToolRouter ?: com.example.apis.routing.ApiToolRouter(context)
+        val query = intent.query ?: intent.target
+        val response = router.routeAndExecute(
+            apiId = intent.apiId,
+            userQuery = query,
+            parameters = intent.apiParams
+        )
+
+        return ActionResult(
+            success = response.success,
+            message = response.formattedSummary.ifBlank { response.errorMessage ?: "API call completed." },
+            launchedTarget = response.apiName,
+            error = response.errorMessage
+        )
+    }
+}
+
 class ActionManager(
     private val appLauncher: AppLauncher,
     private val memoryRepository: MemoryRepository? = null,
-    private val screenControlEngine: ScreenControlEngine? = null
+    private val screenControlEngine: ScreenControlEngine? = null,
+    private val apiToolRouter: com.example.apis.routing.ApiToolRouter? = null
 ) {
     private val actions = mutableMapOf<IntentType, AssistantAction>()
 
@@ -280,6 +309,7 @@ class ActionManager(
         registerAction(BackAction(screenControlEngine))
         registerAction(ClearChatAction())
         registerAction(SetPreferenceAction())
+        registerAction(PublicApiAction(apiToolRouter))
     }
 
     fun registerAction(action: AssistantAction) {
@@ -334,6 +364,7 @@ class ActionManager(
                 IntentType.WAIT -> "Waiting"
                 IntentType.BACK -> "Navigating Back"
                 IntentType.SET_PREFERENCE -> "Saving Preference"
+                IntentType.PUBLIC_API -> "Fetching Data (${stepIntent.apiId ?: "Public API"})"
                 else -> "Executing Step $stepNumber"
             }
 

@@ -20,6 +20,8 @@ class MemoryRepository(
         const val PREF_CUSTOM_API_KEY = "custom_gemini_api_key"
         const val PREF_SERVICE_ENABLED = "foreground_service_enabled"
         const val KEY_LANGUAGE = "preferred_language"
+        const val PREF_HANDS_FREE_ENABLED = "hands_free_voice_enabled"
+        const val PREF_VOICE_LANGUAGE = "voice_speech_language"
     }
 
     val messages: Flow<List<MessageEntity>> = messageDao.getAllMessages()
@@ -170,6 +172,22 @@ class MemoryRepository(
 
     fun setForegroundServiceEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(PREF_SERVICE_ENABLED, enabled).apply()
+    }
+
+    fun isHandsFreeVoiceEnabled(): Boolean {
+        return prefs.getBoolean(PREF_HANDS_FREE_ENABLED, true)
+    }
+
+    fun setHandsFreeVoiceEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(PREF_HANDS_FREE_ENABLED, enabled).apply()
+    }
+
+    fun getVoiceLanguage(): String {
+        return prefs.getString(PREF_VOICE_LANGUAGE, "hi_en") ?: "hi_en"
+    }
+
+    fun setVoiceLanguage(languageCode: String) {
+        prefs.edit().putString(PREF_VOICE_LANGUAGE, languageCode).apply()
     }
 }
 

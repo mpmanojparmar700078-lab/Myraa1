@@ -1,6 +1,11 @@
 package com.example.ui
 
+import android.Manifest
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.example.voice.SpeechLanguage
+import com.example.voice.SpeechState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -49,6 +54,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -118,11 +124,56 @@ fun AssistantScreen(
     val isAccessibilityEnabled by viewModel.isAccessibilityEnabled.collectAsStateWithLifecycle()
     val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
     val isLoadingApps by viewModel.isLoadingApps.collectAsStateWithLifecycle()
+    val apis by viewModel.apis.collectAsStateWithLifecycle()
+    val apiCallHistory by viewModel.apiCallHistory.collectAsStateWithLifecycle()
+    val apiTestResult by viewModel.apiTestResult.collectAsStateWithLifecycle()
+    val isTestingApi by viewModel.isTestingApi.collectAsStateWithLifecycle()
+
+    val capabilities by viewModel.capabilities.collectAsStateWithLifecycle()
+    val activeTask by viewModel.activeTask.collectAsStateWithLifecycle()
+    val schedulerEnabled by viewModel.schedulerEnabled.collectAsStateWithLifecycle()
+    val schedulerIntervalMinutes by viewModel.schedulerIntervalMinutes.collectAsStateWithLifecycle()
+    val schedulerLastRun by viewModel.schedulerLastRunTimestamp.collectAsStateWithLifecycle()
+    val schedulerLastSummary by viewModel.schedulerLastRunSummary.collectAsStateWithLifecycle()
+    val schedulerWorkStatus by viewModel.schedulerWorkStatus.collectAsStateWithLifecycle()
+
+    val speechState by viewModel.speechState.collectAsStateWithLifecycle()
+    val partialTranscript by viewModel.partialTranscript.collectAsStateWithLifecycle()
+    val speechSoundLevel by viewModel.speechSoundLevel.collectAsStateWithLifecycle()
+    val speechError by viewModel.speechError.collectAsStateWithLifecycle()
+    val isHandsFreeVoiceEnabled by viewModel.isHandsFreeVoiceEnabled.collectAsStateWithLifecycle()
+    val selectedSpeechLanguage by viewModel.selectedSpeechLanguage.collectAsStateWithLifecycle()
+
+    var hasMicPermission by remember {
+        mutableStateOf(viewModel.permissionManager.hasMicrophonePermission())
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasMicPermission = isGranted
+        if (isGranted) {
+            viewModel.startVoiceListening()
+        }
+    }
+
+    val handleVoiceClick: () -> Unit = {
+        if (viewModel.permissionManager.hasMicrophonePermission()) {
+            if (speechState == SpeechState.LISTENING) {
+                viewModel.stopVoiceListening()
+            } else {
+                viewModel.startVoiceListening()
+            }
+        } else {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     var inputText by remember { mutableStateOf("") }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var showInstalledAppsSheet by remember { mutableStateOf(false) }
+    var showApiExplorerDialog by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
 
@@ -145,16 +196,50 @@ fun AssistantScreen(
         )
     }
 
+    if (showApiExplorerDialog) {
+        ApiExplorerDialog(
+            apis = apis,
+            callHistory = apiCallHistory,
+            testResult = apiTestResult,
+            isTesting = isTestingApi,
+            onToggleApi = { id, enabled -> viewModel.toggleApiEnabled(id, enabled) },
+            onTestApi = { api -> viewModel.testApi(api) },
+            onClearTestResult = { viewModel.clearApiTestResult() },
+            onReloadCatalog = { viewModel.reloadApiCatalog() },
+            onDismiss = { showApiExplorerDialog = false }
+        )
+    }
+
     if (showSettingsDialog) {
         SettingsDialog(
             customApiKey = customApiKey,
             isServiceEnabled = serviceEnabled,
             isAccessibilityEnabled = isAccessibilityEnabled,
             preferences = preferences,
+            capabilities = capabilities,
+            isWorkSchedulerEnabled = schedulerEnabled,
+            workSchedulerInterval = schedulerIntervalMinutes,
+            workSchedulerStatus = schedulerWorkStatus,
+            workSchedulerLastRun = schedulerLastRun,
+            workSchedulerLastSummary = schedulerLastSummary,
             onSaveApiKey = { viewModel.saveCustomApiKey(it) },
             onToggleService = { viewModel.setForegroundServiceEnabled(it) },
             onOpenAccessibilitySettings = { viewModel.openAccessibilitySettings() },
             onSetLanguage = { viewModel.updateLanguagePreference(it) },
+            onToggleBackgroundListening = { viewModel.setBackgroundListeningEnabled(it) },
+            onToggleGameInteraction = { viewModel.setGameInteractionEnabled(it) },
+            onToggleAutoMode = { viewModel.setAutoMode(it) },
+            onToggleAskBeforeActions = { viewModel.setAskBeforeActions(it) },
+            onToggleWorkScheduler = { viewModel.setWorkSchedulerEnabled(it) },
+            onChangeWorkSchedulerInterval = { viewModel.setWorkSchedulerInterval(it) },
+            onRunImmediateWorkScheduler = { viewModel.runImmediateWorkScheduler() },
+            isHandsFreeVoiceEnabled = isHandsFreeVoiceEnabled,
+            selectedSpeechLanguage = selectedSpeechLanguage,
+            isMicrophonePermissionGranted = hasMicPermission,
+            isSpeechRecognitionAvailable = viewModel.isSpeechRecognitionAvailable,
+            onToggleHandsFreeVoice = { viewModel.setHandsFreeVoiceEnabled(it) },
+            onSelectSpeechLanguage = { viewModel.setSpeechLanguage(it) },
+            onRequestMicrophonePermission = { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
             onDismiss = { showSettingsDialog = false }
         )
     }
@@ -218,6 +303,15 @@ fun AssistantScreen(
                 },
                 actions = {
                     IconButton(
+                        onClick = { showApiExplorerDialog = true },
+                        modifier = Modifier.testTag("public_apis_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Public,
+                            contentDescription = "Public APIs"
+                        )
+                    }
+                    IconButton(
                         onClick = {
                             viewModel.loadInstalledApps()
                             showInstalledAppsSheet = true
@@ -268,8 +362,73 @@ fun AssistantScreen(
                 onOpenAppsSheet = {
                     viewModel.loadInstalledApps()
                     showInstalledAppsSheet = true
+                },
+                onOpenApiExplorer = {
+                    showApiExplorerDialog = true
                 }
             )
+
+            // Active Autonomous Task Banner with Stop / Cancel Control
+            AnimatedVisibility(
+                visible = activeTask != null && activeTask?.isRunning == true,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                activeTask?.let { task ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .testTag("active_task_banner"),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Task Active • ${task.state.name}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(
+                                    text = task.statusMessage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+
+                            FilledTonalButton(
+                                onClick = { viewModel.cancelAutonomousTask() },
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                ),
+                                modifier = Modifier.testTag("cancel_task_button")
+                            ) {
+                                Text("Stop", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
 
             // Conversation Messages Area
             Box(
@@ -283,7 +442,11 @@ fun AssistantScreen(
                         onOpenAppsSheet = {
                             viewModel.loadInstalledApps()
                             showInstalledAppsSheet = true
-                        }
+                        },
+                        onOpenApiExplorer = {
+                            showApiExplorerDialog = true
+                        },
+                        onStartVoice = handleVoiceClick
                     )
                 } else {
                     LazyColumn(
@@ -315,6 +478,24 @@ fun AssistantScreen(
                 }
             }
 
+            // Live Speech-to-Text & Hands-Free Listening Banner
+            LiveVoiceListeningBanner(
+                speechState = speechState,
+                partialTranscript = partialTranscript,
+                soundLevel = speechSoundLevel,
+                errorMessage = speechError,
+                isHandsFreeEnabled = isHandsFreeVoiceEnabled,
+                selectedLanguage = selectedSpeechLanguage,
+                onStopListening = { viewModel.stopVoiceListening() },
+                onCancelListening = { viewModel.cancelVoiceListening() },
+                onSendNow = { cmd ->
+                    viewModel.stopVoiceListening()
+                    if (cmd.isNotBlank()) {
+                        viewModel.sendCommand(cmd)
+                    }
+                }
+            )
+
             // Bottom Input Bar
             BottomCommandInput(
                 text = inputText,
@@ -328,7 +509,11 @@ fun AssistantScreen(
                 onCancel = { viewModel.cancelCurrentRequest() },
                 isProcessing = assistantState == AssistantState.PROCESSING ||
                         assistantState == AssistantState.EXECUTING_ACTION ||
-                        assistantState == AssistantState.CANCELLING
+                        assistantState == AssistantState.CANCELLING,
+                onVoiceClick = handleVoiceClick,
+                isVoiceListening = speechState == SpeechState.LISTENING,
+                isVoiceProcessing = speechState == SpeechState.PROCESSING || speechState == SpeechState.INITIALIZING,
+                voiceSoundLevel = speechSoundLevel
             )
         }
     }
@@ -490,19 +675,20 @@ fun AssistantStatusBadge(state: AssistantState) {
 @Composable
 fun SuggestionChipsRow(
     onSelectChip: (String) -> Unit,
-    onOpenAppsSheet: () -> Unit
+    onOpenAppsSheet: () -> Unit,
+    onOpenApiExplorer: () -> Unit = {}
 ) {
     val suggestions = listOf(
+        "Tell me a joke",
         "YouTube खोलो और Free Fire search करो",
+        "Fruit info apple",
+        "Cat fact",
+        "Bitcoin price",
         "YouTube खोलो",
         "Chrome खोलो",
         "Settings खोलो",
-        "Google खोलो",
         "Google पर Free Fire search करो",
-        "Open Chrome and search weather",
-        "मुझसे हमेशा हिंदी में बात करना",
-        "Always talk in English",
-        "Hello Myra"
+        "मुझसे हमेशा हिंदी में बात करना"
     )
 
     Row(
@@ -512,6 +698,24 @@ fun SuggestionChipsRow(
             .padding(horizontal = 16.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        InputChip(
+            selected = false,
+            onClick = onOpenApiExplorer,
+            label = { Text("🌐 Public APIs", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Public,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            colors = InputChipDefaults.inputChipColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+            ),
+            modifier = Modifier.testTag("suggestion_chip_public_apis")
+        )
+
         InputChip(
             selected = false,
             onClick = onOpenAppsSheet,
@@ -667,7 +871,9 @@ fun MessageBubble(message: MessageEntity) {
 @Composable
 fun EmptyConversationState(
     onSuggestionClick: (String) -> Unit,
-    onOpenAppsSheet: () -> Unit
+    onOpenAppsSheet: () -> Unit,
+    onOpenApiExplorer: () -> Unit = {},
+    onStartVoice: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -727,6 +933,18 @@ fun EmptyConversationState(
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
+                )
+
+                QuickActionItem(
+                    title = "🎙️ Voice Command (बोलकर आदेश दें)",
+                    subtitle = "Hands-free Speech-to-Text: 'YouTube खोलो', 'Check Weather', or any task",
+                    onClick = onStartVoice
+                )
+
+                QuickActionItem(
+                    title = "🌐 Public APIs Catalog & Live Testing",
+                    subtitle = "25+ curated no-auth APIs (Jokes, Nutrition, Weather, Trivia, Crypto)",
+                    onClick = onOpenApiExplorer
                 )
 
                 QuickActionItem(
@@ -814,7 +1032,11 @@ fun BottomCommandInput(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onCancel: () -> Unit,
-    isProcessing: Boolean
+    isProcessing: Boolean,
+    onVoiceClick: () -> Unit = {},
+    isVoiceListening: Boolean = false,
+    isVoiceProcessing: Boolean = false,
+    voiceSoundLevel: Float = 0f
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -860,6 +1082,14 @@ fun BottomCommandInput(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
                 )
+            )
+
+            // Voice Command Button (Hands-Free STT)
+            VoiceMicButton(
+                isListening = isVoiceListening,
+                isProcessing = isVoiceProcessing,
+                soundLevel = voiceSoundLevel,
+                onClick = onVoiceClick
             )
 
             if (isProcessing) {

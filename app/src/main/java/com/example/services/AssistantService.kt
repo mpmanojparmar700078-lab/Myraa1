@@ -71,7 +71,8 @@ class AssistantService(
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     val appLauncher = AppLauncher(context)
     val screenControlEngine = ScreenControlEngine(context, appLauncher)
-    val actionManager = ActionManager(appLauncher, memoryRepository, screenControlEngine)
+    val apiToolRouter = com.example.apis.routing.ApiToolRouter(context)
+    val actionManager = ActionManager(appLauncher, memoryRepository, screenControlEngine, apiToolRouter)
     val localCommandParser = LocalCommandParser()
     val commandParser = CommandParser(localCommandParser)
     val geminiService = GeminiService(commandParser)
@@ -327,6 +328,23 @@ class AssistantService(
             }
         }
 
+        // 3. Public API capability match (Level 1 Fast Public API Routing)
+        val matchedApi = apiToolRouter.matchApiByQuery(input)
+        if (matchedApi != null && matchedApi.enabled) {
+            return LocalCommandResult(
+                recognized = true,
+                intent = IntentType.PUBLIC_API,
+                parsedIntent = ParsedIntent(
+                    type = IntentType.PUBLIC_API,
+                    query = input,
+                    apiId = matchedApi.id,
+                    responseText = "Fetching from ${matchedApi.name}…"
+                ),
+                confidence = 1.0f,
+                reason = "Pre-Gemini fallback matched public API: ${matchedApi.name}"
+            )
+        }
+
         return null
     }
 
@@ -400,7 +418,8 @@ class AssistantService(
             IntentType.SET_PREFERENCE,
             IntentType.WAIT,
             IntentType.BACK,
-            IntentType.CLEAR_CHAT -> {
+            IntentType.CLEAR_CHAT,
+            IntentType.PUBLIC_API -> {
                 _assistantState.value = AssistantState.EXECUTING_ACTION
                 val actionResult = actionManager.executeIntent(
                     intent = intent,
@@ -420,6 +439,8 @@ class AssistantService(
                 _lastActionResult.value = actionResult
 
                 val replyText = if (!actionResult.success) {
+                    actionResult.message
+                } else if (intent.type == IntentType.PUBLIC_API) {
                     actionResult.message
                 } else if (intent.type == IntentType.YOUTUBE_SEARCH || intent.type == IntentType.YOUTUBE_SEARCH_AND_PLAY) {
                     actionResult.message.takeIf { it.isNotBlank() } ?: (intent.responseText ?: "कार्य पूरा हुआ।")

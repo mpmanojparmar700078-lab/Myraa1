@@ -22,6 +22,7 @@ enum class IntentType {
     BACK,
     CLEAR_CHAT,
     MULTI_ACTION,
+    PUBLIC_API,
     GENERAL_CHAT,
     UNKNOWN
 }
@@ -61,6 +62,8 @@ data class ParsedIntent(
     val durationMs: Long? = null,
     val actions: List<ParsedIntent> = emptyList(),
     val responseText: String? = null,
+    val apiId: String? = null,
+    val apiParams: Map<String, String> = emptyMap(),
     val confidence: Float = 1.0f
 )
 

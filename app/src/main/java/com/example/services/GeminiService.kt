@@ -169,11 +169,14 @@ class GeminiService(
                 - BACK: Navigates back / home.
                 - CLEAR_CHAT: Clears conversation history.
                 - SET_PREFERENCE: Saves language (key: "preferred_language", value: "hi" or "en").
+                - PUBLIC_API: Fetches data from integrated no-auth public APIs (jokeapi, fruityvice, cat_facts, dog_facts, open_trivia, bored_api, quotable, freetogame, open_meteo, wttr_in, rest_countries, spacex, coingecko_simple, dictionary, adviceslip, numbersapi).
                 - GENERAL_CHAT: Answers questions, conversational replies.
                 
                 SCHEMAS:
                 A. Single Action:
                    {"intent": "OPEN_APP", "app": "YouTube", "responseText": "Opening YouTube…"}
+                   {"intent": "PUBLIC_API", "apiId": "jokeapi", "query": "joke", "responseText": "यहाँ एक चुटकुला है:"}
+                   {"intent": "PUBLIC_API", "apiId": "fruityvice", "parameters": {"name": "apple"}, "responseText": "सेब की पोषण जानकारी लाई जा रही है…"}
                    {"intent": "WEB_SEARCH", "query": "Free Fire", "responseText": "Searching Google for Free Fire…"}
                    {"intent": "SET_PREFERENCE", "key": "preferred_language", "value": "hi", "responseText": "ठीक है, मैं याद रखूँगी।"}
                 

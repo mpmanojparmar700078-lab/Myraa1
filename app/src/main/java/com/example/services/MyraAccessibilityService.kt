@@ -543,4 +543,22 @@ class MyraAccessibilityService : AccessibilityService() {
             }
         }, null)
     }
+
+    /**
+     * Performs forward scrolling on the active scrollable window.
+     */
+    fun performScrollForward(): AccessibilityActionResult {
+        val root = rootInActiveWindow
+            ?: return AccessibilityActionResult(
+                success = false,
+                actionType = AccessibilityActionType.SCROLL_FORWARD,
+                message = "No active window available"
+            )
+        val success = treeReader.performScrollForward(root)
+        return AccessibilityActionResult(
+            success = success,
+            actionType = AccessibilityActionType.SCROLL_FORWARD,
+            message = if (success) "Scrolled forward" else "Scroll forward failed or window not scrollable"
+        )
+    }
 }

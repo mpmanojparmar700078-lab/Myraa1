@@ -18,11 +18,20 @@ class MyraApplication : Application() {
     lateinit var database: MyraDatabase
         private set
 
+    lateinit var backgroundScheduler: com.example.work.MyraBackgroundScheduler
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         database = MyraDatabase.getDatabase(this)
+        backgroundScheduler = com.example.work.MyraBackgroundScheduler(this)
         createNotificationChannel()
+
+        // Auto-schedule background AI orchestration if enabled in settings
+        if (backgroundScheduler.isSchedulerEnabled.value) {
+            backgroundScheduler.schedulePeriodicOrchestration()
+        }
     }
 
     private fun createNotificationChannel() {

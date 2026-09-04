@@ -77,6 +77,12 @@ import com.example.data.UserPreferenceEntity
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.SmartToy
 
 @Composable
 fun SettingsDialog(
@@ -84,10 +90,30 @@ fun SettingsDialog(
     isServiceEnabled: Boolean,
     isAccessibilityEnabled: Boolean,
     preferences: List<UserPreferenceEntity>,
+    capabilities: com.example.device.MyraCapabilitiesState? = null,
+    isWorkSchedulerEnabled: Boolean = true,
+    workSchedulerInterval: Long = 60L,
+    workSchedulerStatus: String = "IDLE",
+    workSchedulerLastRun: Long = 0L,
+    workSchedulerLastSummary: String = "",
     onSaveApiKey: (String) -> Unit,
     onToggleService: (Boolean) -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onSetLanguage: (String) -> Unit,
+    onToggleBackgroundListening: ((Boolean) -> Unit)? = null,
+    onToggleGameInteraction: ((Boolean) -> Unit)? = null,
+    onToggleAutoMode: ((Boolean) -> Unit)? = null,
+    onToggleAskBeforeActions: ((Boolean) -> Unit)? = null,
+    onToggleWorkScheduler: ((Boolean) -> Unit)? = null,
+    onChangeWorkSchedulerInterval: ((Long) -> Unit)? = null,
+    onRunImmediateWorkScheduler: (() -> Unit)? = null,
+    isHandsFreeVoiceEnabled: Boolean = true,
+    selectedSpeechLanguage: com.example.voice.SpeechLanguage = com.example.voice.SpeechLanguage.BILINGUAL,
+    isMicrophonePermissionGranted: Boolean = true,
+    isSpeechRecognitionAvailable: Boolean = true,
+    onToggleHandsFreeVoice: ((Boolean) -> Unit)? = null,
+    onSelectSpeechLanguage: ((com.example.voice.SpeechLanguage) -> Unit)? = null,
+    onRequestMicrophonePermission: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     var apiKeyInput by remember { mutableStateOf(customApiKey) }
@@ -500,7 +526,392 @@ fun SettingsDialog(
                     }
                 }
 
-                // Section 5: Saved Memory
+                // Section 5: WorkManager AI Background Task Scheduler
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "AI Background Orchestrator",
+                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
+
+                            // WorkManager Status Badge
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isWorkSchedulerEnabled) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                tonalElevation = 1.dp
+                            ) {
+                                Text(
+                                    text = workSchedulerStatus,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isWorkSchedulerEnabled) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Uses Android WorkManager to run recurring background AI orchestration (memory compaction, public data briefing sync, system capability checks) even when Myra is closed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Periodic Scheduling",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Switch(
+                                checked = isWorkSchedulerEnabled,
+                                onCheckedChange = { onToggleWorkScheduler?.invoke(it) },
+                                modifier = Modifier.testTag("work_scheduler_switch")
+                            )
+                        }
+
+                        if (isWorkSchedulerEnabled) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Sync Interval",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf(15L to "15m", 60L to "1h", 360L to "6h", 1440L to "24h").forEach { (mins, label) ->
+                                        FilterChip(
+                                            selected = workSchedulerInterval == mins,
+                                            onClick = { onChangeWorkSchedulerInterval?.invoke(mins) },
+                                            label = { Text(label) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (workSchedulerLastSummary.isNotBlank()) {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surface
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Text(
+                                        text = "Last Background Run:",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = workSchedulerLastSummary,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = { onRunImmediateWorkScheduler?.invoke() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("run_work_now_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Run Background Job Now", fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                // Section 6: Device Capabilities & Automation Modes
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.SmartToy,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Device Access & Automation",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+
+                        capabilities?.let { caps ->
+                            // Background Listening Toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Background Hotword & Listening", style = MaterialTheme.typography.bodyMedium)
+                                    Text("Listens for trigger commands when active", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(
+                                    checked = caps.isBackgroundListeningEnabled,
+                                    onCheckedChange = { onToggleBackgroundListening?.invoke(it) }
+                                )
+                            }
+
+                            // Game Interaction Toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Game Interaction Mode", style = MaterialTheme.typography.bodyMedium)
+                                    Text("Touch gesture injection for games/OpenGL canvases", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(
+                                    checked = caps.isGameInteractionEnabled,
+                                    onCheckedChange = { onToggleGameInteraction?.invoke(it) }
+                                )
+                            }
+
+                            // Autonomous Execution Mode: Auto Mode vs Assist Mode
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (caps.isAutoMode) "Autonomous Mode (Auto)" else "Assist Mode (Confirm Actions)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = if (caps.isAutoMode) "Myra autonomously executes multi-step plans" else "Myra asks for confirmation before critical actions",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = caps.isAutoMode,
+                                    onCheckedChange = { onToggleAutoMode?.invoke(it) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Section 7: Speech-to-Text & Hands-Free Interaction
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Speech-to-Text & Hands-Free",
+                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
+
+                            // Engine Status Badge
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSpeechRecognitionAvailable) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.errorContainer
+                                },
+                                tonalElevation = 1.dp
+                            ) {
+                                Text(
+                                    text = if (isSpeechRecognitionAvailable) "STT Ready" else "STT Unavailable",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSpeechRecognitionAvailable) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.error
+                                    }
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Myra uses native SpeechRecognizer to transcribe voice in real-time. Hands-free mode automatically executes commands as soon as you stop speaking.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // Hands-free Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Hands-Free Auto-Execution",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Automatically execute recognized command without pressing Send",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = isHandsFreeVoiceEnabled,
+                                onCheckedChange = { onToggleHandsFreeVoice?.invoke(it) }
+                            )
+                        }
+
+                        // Microphone Permission Status
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Microphone Permission",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = if (isMicrophonePermissionGranted) "Granted (Ready for voice)" else "Permission required for voice input",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isMicrophonePermissionGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                )
+                            }
+                            if (!isMicrophonePermissionGranted) {
+                                OutlinedButton(
+                                    onClick = { onRequestMicrophonePermission?.invoke() },
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Grant", fontSize = 12.sp)
+                                }
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Permission Granted",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        // Speech Language Selector Chips
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "Speech Recognition Language",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                com.example.voice.SpeechLanguage.entries.forEach { lang ->
+                                    val isSelected = lang == selectedSpeechLanguage
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { onSelectSpeechLanguage?.invoke(lang) },
+                                        label = {
+                                            Text(
+                                                text = when (lang) {
+                                                    com.example.voice.SpeechLanguage.BILINGUAL -> "Bilingual"
+                                                    com.example.voice.SpeechLanguage.HINDI -> "हिन्दी"
+                                                    com.example.voice.SpeechLanguage.ENGLISH -> "English"
+                                                },
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Section 8: Saved Memory
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)

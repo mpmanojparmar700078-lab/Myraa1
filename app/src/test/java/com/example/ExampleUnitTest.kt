@@ -780,6 +780,76 @@ class ExampleUnitTest {
             assertNotNull(result.parsedIntent?.responseText)
         }
     }
+
+    // ==========================================
+    // SPEECH-TO-TEXT & HANDS-FREE VOICE TESTS
+    // ==========================================
+
+    @Test
+    fun test_SpeechLanguage_FromCode_Mapping() {
+        assertEquals(com.example.voice.SpeechLanguage.BILINGUAL, com.example.voice.SpeechLanguage.fromCode("hi_en"))
+        assertEquals(com.example.voice.SpeechLanguage.HINDI, com.example.voice.SpeechLanguage.fromCode("hi"))
+        assertEquals(com.example.voice.SpeechLanguage.ENGLISH, com.example.voice.SpeechLanguage.fromCode("en"))
+        // Fallback for unknown code
+        assertEquals(com.example.voice.SpeechLanguage.BILINGUAL, com.example.voice.SpeechLanguage.fromCode("unknown_code"))
+    }
+
+    @Test
+    fun test_SpeechModels_StateAndResult() {
+        val result = com.example.voice.SpeechRecognitionResult(
+            transcript = "YouTube खोलो और Free Fire search करो",
+            confidence = 0.95f,
+            isFinal = true
+        )
+        assertEquals("YouTube खोलो और Free Fire search करो", result.transcript)
+        assertTrue(result.isFinal)
+        assertEquals(0.95f, result.confidence, 0.001f)
+
+        val activeState = com.example.voice.SpeechState.LISTENING
+        assertEquals(com.example.voice.SpeechState.LISTENING, activeState)
+    }
+
+    @Test
+    fun test_SpeechToTextManager_Robolectric_Instantiation_And_StateFlows() {
+        val mockContext = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val manager = com.example.voice.SpeechToTextManager(mockContext)
+
+        // Initial states
+        assertEquals(com.example.voice.SpeechState.IDLE, manager.speechState.value)
+        assertEquals("", manager.partialTranscript.value)
+        assertEquals(0f, manager.soundLevel.value, 0.001f)
+        assertNull(manager.lastError.value)
+
+        // Language toggle
+        manager.setSelectedLanguage(com.example.voice.SpeechLanguage.HINDI)
+        assertEquals(com.example.voice.SpeechLanguage.HINDI, manager.selectedLanguage.value)
+
+        manager.setHandsFreeEnabled(false)
+        assertFalse(manager.handsFreeEnabled.value)
+        manager.setHandsFreeEnabled(true)
+        assertTrue(manager.handsFreeEnabled.value)
+
+        manager.destroy()
+    }
+
+    @Test
+    fun test_VoiceTriggeredCommand_InLocalCommandParser() {
+        val parser = LocalCommandParser()
+
+        // Spoken transcript simulation
+        val voiceCommands = listOf(
+            "YouTube kholo" to IntentType.OPEN_APP,
+            "YouTube पर Arijit Singh ke gaane chalao" to IntentType.YOUTUBE_SEARCH_AND_PLAY,
+            "Google par Free Fire search kro" to IntentType.WEB_SEARCH,
+            "Settings open karo" to IntentType.OPEN_APP
+        )
+
+        for ((transcript, expectedIntent) in voiceCommands) {
+            val result = parser.parse(transcript)
+            assertTrue("Voice transcript '$transcript' should be recognized locally", result.recognized)
+            assertEquals("Intent for '$transcript' must match expected", expectedIntent, result.intent)
+        }
+    }
 }
 
 

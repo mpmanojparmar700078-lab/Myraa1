@@ -70,6 +70,17 @@ class CommandParser(
                     val subDuration = subObj.optLong("durationMs", 1000L)
                     val subKey = subObj.optString("key", "").takeIf { it.isNotBlank() }
                     val subValue = subObj.optString("value", "").takeIf { it.isNotBlank() }
+                    val subApiId = subObj.optString("apiId", "").takeIf { it.isNotBlank() }
+                        ?: subObj.optString("api", "").takeIf { it.isNotBlank() }
+                    val subApiParams = mutableMapOf<String, String>()
+                    val subParamsObj = subObj.optJSONObject("parameters") ?: subObj.optJSONObject("params")
+                    if (subParamsObj != null) {
+                        val itKeys = subParamsObj.keys()
+                        while (itKeys.hasNext()) {
+                            val k = itKeys.next()
+                            subApiParams[k] = subParamsObj.optString(k)
+                        }
+                    }
 
                     parsedSubActions.add(
                         ParsedIntent(
@@ -79,7 +90,9 @@ class CommandParser(
                             target = subTarget,
                             durationMs = subDuration,
                             key = subKey,
-                            value = subValue
+                            value = subValue,
+                            apiId = subApiId,
+                            apiParams = subApiParams
                         )
                     )
                 }
@@ -109,6 +122,19 @@ class CommandParser(
             val responseText = json.optString("responseText", "").takeIf { it.isNotBlank() }
                 ?: json.optString("response", "Command processed.")
 
+            val apiId = json.optString("apiId", "").takeIf { it.isNotBlank() }
+                ?: json.optString("api", "").takeIf { it.isNotBlank() }
+
+            val apiParams = mutableMapOf<String, String>()
+            val paramsObj = json.optJSONObject("parameters") ?: json.optJSONObject("params")
+            if (paramsObj != null) {
+                val itKeys = paramsObj.keys()
+                while (itKeys.hasNext()) {
+                    val k = itKeys.next()
+                    apiParams[k] = paramsObj.optString(k)
+                }
+            }
+
             val type = mapStringToIntentType(intentStr)
 
             return ParsedIntent(
@@ -119,7 +145,9 @@ class CommandParser(
                 key = key,
                 value = value,
                 durationMs = duration,
-                responseText = responseText
+                responseText = responseText,
+                apiId = apiId,
+                apiParams = apiParams
             )
         } catch (e: Exception) {
             // If response was not valid JSON, treat the entire string safely as general chat reply
@@ -142,6 +170,7 @@ class CommandParser(
             "WAIT" -> IntentType.WAIT
             "BACK" -> IntentType.BACK
             "CLEAR_CHAT" -> IntentType.CLEAR_CHAT
+            "PUBLIC_API" -> IntentType.PUBLIC_API
             "GENERAL_CHAT" -> IntentType.GENERAL_CHAT
             else -> IntentType.UNKNOWN
         }

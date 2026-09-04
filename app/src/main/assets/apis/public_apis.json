@@ -1,0 +1,710 @@
+[
+  {
+    "id": "jokeapi",
+    "name": "JokeAPI",
+    "description": "Uniformly formatted jokes across various categories with safe mode filtering.",
+    "category": "Entertainment",
+    "baseUrl": "https://v2.jokeapi.dev",
+    "endpoint": "/joke/Any?safe-mode",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "category",
+        "type": "string",
+        "required": false,
+        "description": "Category: Programming, Misc, Pun, Spooky, Christmas",
+        "defaultValue": "Any",
+        "location": "path"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "type": "$.type",
+      "single": "$.joke",
+      "setup": "$.setup",
+      "delivery": "$.delivery",
+      "category": "$.category"
+    },
+    "documentationUrl": "https://sv443.net/jokeapi/v2/",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "120 requests/minute",
+    "cacheTtlSeconds": 0,
+    "tags": ["joke", "jokes", "humor", "funny", "laugh", "चुटकुला", "हंसी", "मज़ाक"],
+    "capabilities": ["get_joke", "entertainment", "humor"]
+  },
+  {
+    "id": "chucknorris",
+    "name": "Chuck Norris Jokes",
+    "description": "Free JSON API for curated Chuck Norris facts and jokes.",
+    "category": "Entertainment",
+    "baseUrl": "https://api.chucknorris.io",
+    "endpoint": "/jokes/random",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "text": "$.value",
+      "category": "$.categories[0]"
+    },
+    "documentationUrl": "https://api.chucknorris.io/",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Unmetered fair use",
+    "cacheTtlSeconds": 0,
+    "tags": ["chuck norris", "joke", "action", "meme", "funny"],
+    "capabilities": ["get_joke", "entertainment"]
+  },
+  {
+    "id": "fruityvice",
+    "name": "Fruityvice",
+    "description": "Comprehensive fruit nutritional data including calories, carbohydrates, sugar, protein, and botanical family.",
+    "category": "Food & Drink",
+    "baseUrl": "https://www.fruityvice.com",
+    "endpoint": "/api/fruit/{name}",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Name of the fruit (e.g. apple, banana, mango, strawberry)",
+        "defaultValue": "apple",
+        "location": "path"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "title": "$.name",
+      "family": "$.family",
+      "calories": "$.nutritions.calories",
+      "sugar": "$.nutritions.sugar",
+      "carbohydrates": "$.nutritions.carbohydrates",
+      "protein": "$.nutritions.protein",
+      "fat": "$.nutritions.fat"
+    },
+    "documentationUrl": "https://www.fruityvice.com/",
+    "enabled": true,
+    "timeoutMs": 9000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 86400,
+    "tags": ["fruit", "fruits", "nutrition", "calories", "sugar", "diet", "healthy", "food", "फल", "सेब", "केला", "आम"],
+    "capabilities": ["get_fruit_info", "nutrition", "food_data"]
+  },
+  {
+    "id": "cat_facts",
+    "name": "Cat Facts",
+    "description": "Daily facts and trivia about cats and felines.",
+    "category": "Animals",
+    "baseUrl": "https://catfact.ninja",
+    "endpoint": "/fact",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "text": "$.fact"
+    },
+    "documentationUrl": "https://catfact.ninja/",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 3600,
+    "tags": ["cat", "cats", "kitten", "feline", "animal", "pet", "बिल्ली", "जानवर"],
+    "capabilities": ["get_cat_fact", "animal_facts"]
+  },
+  {
+    "id": "dog_facts",
+    "name": "Dog Facts",
+    "description": "Random fascinating scientific facts and trivia about dogs.",
+    "category": "Animals",
+    "baseUrl": "https://dogapi.dog",
+    "endpoint": "/api/v2/facts?limit=1",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "text": "$.data[0].attributes.body"
+    },
+    "documentationUrl": "https://dogapi.dog/docs/api-v2",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 3600,
+    "tags": ["dog", "dogs", "puppy", "canine", "animal", "pet", "कुत्ता", "पिल्ला"],
+    "capabilities": ["get_dog_fact", "animal_facts"]
+  },
+  {
+    "id": "open_trivia",
+    "name": "Open Trivia DB",
+    "description": "User-contributed trivia questions across science, history, geography, entertainment, and pop culture.",
+    "category": "Entertainment",
+    "baseUrl": "https://opentdb.com",
+    "endpoint": "/api.php?amount=1&type=multiple",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "amount",
+        "type": "integer",
+        "required": false,
+        "defaultValue": "1",
+        "location": "query"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "question": "$.results[0].question",
+      "answer": "$.results[0].correct_answer",
+      "category": "$.results[0].category",
+      "difficulty": "$.results[0].difficulty",
+      "incorrectAnswers": "$.results[0].incorrect_answers"
+    },
+    "documentationUrl": "https://opentdb.com/api_config.php",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "1 request per 5 seconds",
+    "cacheTtlSeconds": 0,
+    "tags": ["trivia", "quiz", "question", "general knowledge", "gk", "पहेली", "सवाल", "प्रश्नोत्तरी"],
+    "capabilities": ["get_trivia", "quiz", "education"]
+  },
+  {
+    "id": "bored_api",
+    "name": "Bored Activity Suggester",
+    "description": "Recommends engaging activities, hobbies, and tasks when feeling bored.",
+    "category": "Utilities",
+    "baseUrl": "https://bored-api.appbrewery.com",
+    "endpoint": "/random",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "text": "$.activity",
+      "type": "$.type",
+      "participants": "$.participants",
+      "price": "$.price"
+    },
+    "documentationUrl": "https://bored-api.appbrewery.com/",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 0,
+    "tags": ["bored", "activity", "idea", "hobby", "timepass", "मन नहीं लग रहा", "क्या करूं", "बोरियत"],
+    "capabilities": ["get_activity", "entertainment", "lifestyle"]
+  },
+  {
+    "id": "quotable",
+    "name": "Inspirational Quotes",
+    "description": "Curated collection of inspirational, philosophical, and author quotes.",
+    "category": "Books",
+    "baseUrl": "https://dummyjson.com",
+    "endpoint": "/quotes/random",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "text": "$.quote",
+      "author": "$.author"
+    },
+    "documentationUrl": "https://dummyjson.com/docs/quotes",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 0,
+    "tags": ["quote", "quotes", "inspiration", "wisdom", "author", "motivational", "सुविचार", "अनमोल विचार", "प्रेरणा"],
+    "capabilities": ["get_quote", "motivation", "literature"]
+  },
+  {
+    "id": "freetogame",
+    "name": "FreeToGame",
+    "description": "Catalog of popular free-to-play PC, browser, and shooter games with ratings and genres.",
+    "category": "Games & Comics",
+    "baseUrl": "https://www.freetogame.com",
+    "endpoint": "/api/games",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "title": "$[0].title",
+      "genre": "$[0].genre",
+      "platform": "$[0].platform",
+      "description": "$[0].short_description",
+      "url": "$[0].game_url"
+    },
+    "documentationUrl": "https://www.freetogame.com/api-doc",
+    "enabled": true,
+    "timeoutMs": 9000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 14400,
+    "tags": ["game", "games", "pc game", "free game", "steam", "mmo", "shooter", "गेम", "खेल"],
+    "capabilities": ["get_game_recommendation", "gaming"]
+  },
+  {
+    "id": "open_meteo",
+    "name": "Open-Meteo Weather",
+    "description": "Accurate open-source weather forecasts, temperature, relative humidity, and wind speed without API key.",
+    "category": "Weather",
+    "baseUrl": "https://api.open-meteo.com",
+    "endpoint": "/v1/forecast?latitude=28.6139&longitude=77.2090&current=temperature_2m,relative_humidity_2m,wind_speed_10m",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "latitude",
+        "type": "number",
+        "required": false,
+        "defaultValue": "28.6139",
+        "location": "query"
+      },
+      {
+        "name": "longitude",
+        "type": "number",
+        "required": false,
+        "defaultValue": "77.2090",
+        "location": "query"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "temperature": "$.current.temperature_2m",
+      "humidity": "$.current.relative_humidity_2m",
+      "windSpeed": "$.current.wind_speed_10m",
+      "time": "$.current.time"
+    },
+    "documentationUrl": "https://open-meteo.com/en/docs",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "10,000 daily requests free",
+    "cacheTtlSeconds": 900,
+    "tags": ["weather", "temperature", "climate", "forecast", "rain", "मौसम", "तापमान", "हवा"],
+    "capabilities": ["get_weather", "meteorology"]
+  },
+  {
+    "id": "wttr_in",
+    "name": "wttr.in City Weather",
+    "description": "Global city weather service returning clean JSON conditions for any requested city.",
+    "category": "Weather",
+    "baseUrl": "https://wttr.in",
+    "endpoint": "/{location}?format=j1",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "location",
+        "type": "string",
+        "required": true,
+        "description": "City name, e.g. London, Delhi, Tokyo, Mumbai, New York",
+        "defaultValue": "Delhi",
+        "location": "path"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "temperature": "$.current_condition[0].temp_C",
+      "feelsLike": "$.current_condition[0].FeelsLikeC",
+      "description": "$.current_condition[0].weatherDesc[0].value",
+      "humidity": "$.current_condition[0].humidity",
+      "windSpeed": "$.current_condition[0].windspeedKmph"
+    },
+    "documentationUrl": "https://github.com/chubin/wttr.in",
+    "enabled": true,
+    "timeoutMs": 9000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 1800,
+    "tags": ["weather", "city weather", "temperature", "forecast", "climate", "मौसम"],
+    "capabilities": ["get_weather_by_city", "meteorology"]
+  },
+  {
+    "id": "rest_countries",
+    "name": "REST Countries",
+    "description": "Detailed geographical and geopolitical data for countries: capital, population, region, currencies, languages, borders.",
+    "category": "Geography",
+    "baseUrl": "https://restcountries.com",
+    "endpoint": "/v3.1/name/{name}",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Country name (e.g. India, Japan, Canada, Germany, France)",
+        "defaultValue": "India",
+        "location": "path"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "name": "$[0].name.common",
+      "officialName": "$[0].name.official",
+      "capital": "$[0].capital[0]",
+      "region": "$[0].region",
+      "subregion": "$[0].subregion",
+      "population": "$[0].population",
+      "flag": "$[0].flag"
+    },
+    "documentationUrl": "https://restcountries.com/",
+    "enabled": true,
+    "timeoutMs": 9000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 86400,
+    "tags": ["country", "capital", "population", "geography", "nation", "flag", "continent", "देश", "राजधानी", "जनसंख्या"],
+    "capabilities": ["get_country_info", "geography"]
+  },
+  {
+    "id": "spacex",
+    "name": "SpaceX API",
+    "description": "Live and historical data about SpaceX rocket launches, payloads, and mission details.",
+    "category": "Science",
+    "baseUrl": "https://api.spacexdata.com",
+    "endpoint": "/v4/launches/latest",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "mission": "$.name",
+      "flightNumber": "$.flight_number",
+      "date": "$.date_utc",
+      "details": "$.details",
+      "success": "$.success"
+    },
+    "documentationUrl": "https://github.com/r-spacex/SpaceX-API",
+    "enabled": true,
+    "timeoutMs": 9000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 3600,
+    "tags": ["space", "spacex", "rocket", "launch", "falcon", "starship", "astronomy", "रॉकेट", "अंतरिक्ष"],
+    "capabilities": ["get_space_launch", "science", "space"]
+  },
+  {
+    "id": "agify",
+    "name": "Agify.io",
+    "description": "Predicts age based on a first name using statistical population datasets.",
+    "category": "Machine Learning",
+    "baseUrl": "https://api.agify.io",
+    "endpoint": "/?name={name}",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "First name to predict age for",
+        "defaultValue": "Manoj",
+        "location": "query"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "name": "$.name",
+      "age": "$.age",
+      "count": "$.count"
+    },
+    "documentationUrl": "https://agify.io/",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "1000 requests/day",
+    "cacheTtlSeconds": 86400,
+    "tags": ["age", "name", "guess age", "predict age", "उम्र", "नाम"],
+    "capabilities": ["predict_age", "machine_learning"]
+  },
+  {
+    "id": "nationalize",
+    "name": "Nationalize.io",
+    "description": "Predicts country of origin probabilities based on a surname or first name.",
+    "category": "Machine Learning",
+    "baseUrl": "https://api.nationalize.io",
+    "endpoint": "/?name={name}",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Name to estimate nationality for",
+        "defaultValue": "Sharma",
+        "location": "query"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "name": "$.name",
+      "country": "$.country[0].country_id",
+      "probability": "$.country[0].probability"
+    },
+    "documentationUrl": "https://nationalize.io/",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "1000 requests/day",
+    "cacheTtlSeconds": 86400,
+    "tags": ["nationality", "origin", "name", "citizenship"],
+    "capabilities": ["predict_nationality", "machine_learning"]
+  },
+  {
+    "id": "coingecko_simple",
+    "name": "CoinGecko Crypto Rates",
+    "description": "Live cryptocurrency spot prices in USD and INR for top digital assets.",
+    "category": "Finance",
+    "baseUrl": "https://api.coingecko.com",
+    "endpoint": "/api/v3/simple/price?ids={coin}&vs_currencies=usd,inr",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "coin",
+        "type": "string",
+        "required": false,
+        "description": "Coin id: bitcoin, ethereum, solana, dogecoin",
+        "defaultValue": "bitcoin,ethereum",
+        "location": "query"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "btcUsd": "$.bitcoin.usd",
+      "btcInr": "$.bitcoin.inr",
+      "ethUsd": "$.ethereum.usd",
+      "ethInr": "$.ethereum.inr"
+    },
+    "documentationUrl": "https://www.coingecko.com/en/api",
+    "enabled": true,
+    "timeoutMs": 9000,
+    "rateLimitInfo": "30 requests/minute",
+    "cacheTtlSeconds": 120,
+    "tags": ["crypto", "bitcoin", "ethereum", "btc", "eth", "cryptocurrency", "finance", "price", "बिटकॉइन", "क्रिप्टो"],
+    "capabilities": ["get_crypto_price", "finance"]
+  },
+  {
+    "id": "dictionary",
+    "name": "Free Dictionary API",
+    "description": "English dictionary definitions, pronunciations, parts of speech, and example sentences.",
+    "category": "Books",
+    "baseUrl": "https://api.dictionaryapi.dev",
+    "endpoint": "/api/v2/entries/en/{word}",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "word",
+        "type": "string",
+        "required": true,
+        "description": "English word to define",
+        "defaultValue": "serendipity",
+        "location": "path"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "word": "$[0].word",
+      "phonetic": "$[0].phonetic",
+      "partOfSpeech": "$[0].meanings[0].partOfSpeech",
+      "definition": "$[0].meanings[0].definitions[0].definition",
+      "example": "$[0].meanings[0].definitions[0].example"
+    },
+    "documentationUrl": "https://dictionaryapi.dev/",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 86400,
+    "tags": ["dictionary", "define", "meaning", "definition", "word", "vocabulary", "english", "शब्द", "अर्थ", "डिक्शनरी"],
+    "capabilities": ["get_definition", "vocabulary", "education"]
+  },
+  {
+    "id": "adviceslip",
+    "name": "Advice Slip",
+    "description": "Random practical life advice, tips, and thoughtful guidance.",
+    "category": "Utilities",
+    "baseUrl": "https://api.adviceslip.com",
+    "endpoint": "/advice",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "text": "$.slip.advice"
+    },
+    "documentationUrl": "https://api.adviceslip.com/",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Fair use (cached 2 sec)",
+    "cacheTtlSeconds": 0,
+    "tags": ["advice", "tip", "guidance", "counsel", "सलाह", "सुझाव"],
+    "capabilities": ["get_advice", "utilities", "lifestyle"]
+  },
+  {
+    "id": "numbersapi",
+    "name": "Numbers API",
+    "description": "Fascinating mathematical and historical facts about numbers.",
+    "category": "Science",
+    "baseUrl": "http://numbersapi.com",
+    "endpoint": "/random/trivia?json",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": false,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "text": "$.text",
+      "number": "$.number"
+    },
+    "documentationUrl": "http://numbersapi.com/",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 3600,
+    "tags": ["number", "math", "fact", "trivia", "संख्या", "गणित"],
+    "capabilities": ["get_number_fact", "science"]
+  },
+  {
+    "id": "randomuser",
+    "name": "Random User Generator",
+    "description": "Generates realistic random user profile data including names, emails, avatars, and countries.",
+    "category": "Development",
+    "baseUrl": "https://randomuser.me",
+    "endpoint": "/api/",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [],
+    "responseType": "json",
+    "responseMapping": {
+      "name": "$.results[0].name.first",
+      "lastName": "$.results[0].name.last",
+      "email": "$.results[0].email",
+      "country": "$.results[0].location.country",
+      "city": "$.results[0].location.city"
+    },
+    "documentationUrl": "https://randomuser.me/documentation",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 0,
+    "tags": ["user", "persona", "profile", "test data", "developer"],
+    "capabilities": ["get_random_user", "development"]
+  },
+  {
+    "id": "universities",
+    "name": "World Universities",
+    "description": "Searches higher education institutions and university domains worldwide.",
+    "category": "Books",
+    "baseUrl": "http://universities.hipolabs.com",
+    "endpoint": "/search?name={name}",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": false,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "University name search term",
+        "defaultValue": "Delhi",
+        "location": "query"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "name": "$[0].name",
+      "country": "$[0].country",
+      "webPage": "$[0].web_pages[0]"
+    },
+    "documentationUrl": "https://github.com/Hipo/university-domains-list",
+    "enabled": true,
+    "timeoutMs": 9000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 86400,
+    "tags": ["university", "college", "education", "school", "campus", "विश्वविद्यालय", "कॉलेज"],
+    "capabilities": ["search_universities", "education"]
+  },
+  {
+    "id": "sunrise_sunset",
+    "name": "Sunrise & Sunset Times",
+    "description": "Accurate solar astronomical calculations for sunrise, sunset, dawn, and dusk times by geographic coordinates.",
+    "category": "Science",
+    "baseUrl": "https://api.sunrise-sunset.org",
+    "endpoint": "/json?lat=28.6139&lng=77.2090&formatted=0",
+    "httpMethod": "GET",
+    "auth": "None",
+    "https": true,
+    "cors": "Yes",
+    "parameters": [
+      {
+        "name": "lat",
+        "type": "number",
+        "required": false,
+        "defaultValue": "28.6139",
+        "location": "query"
+      },
+      {
+        "name": "lng",
+        "type": "number",
+        "required": false,
+        "defaultValue": "77.2090",
+        "location": "query"
+      }
+    ],
+    "responseType": "json",
+    "responseMapping": {
+      "sunrise": "$.results.sunrise",
+      "sunset": "$.results.sunset",
+      "solarNoon": "$.results.solar_noon",
+      "dayLength": "$.results.day_length"
+    },
+    "documentationUrl": "https://sunrise-sunset.org/api",
+    "enabled": true,
+    "timeoutMs": 8000,
+    "rateLimitInfo": "Fair use",
+    "cacheTtlSeconds": 3600,
+    "tags": ["sunrise", "sunset", "sun", "dawn", "dusk", "solar", "सूर्योदय", "सूर्यास्त", "धूप"],
+    "capabilities": ["get_sun_times", "astronomy", "science"]
+  }
+]
