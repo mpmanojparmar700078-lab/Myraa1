@@ -841,7 +841,7 @@ class ExampleUnitTest {
             "YouTube kholo" to IntentType.OPEN_APP,
             "YouTube पर Arijit Singh ke gaane chalao" to IntentType.YOUTUBE_SEARCH_AND_PLAY,
             "Google par Free Fire search kro" to IntentType.WEB_SEARCH,
-            "Settings open karo" to IntentType.OPEN_APP
+            "Settings open karo" to IntentType.OPEN_SETTINGS
         )
 
         for ((transcript, expectedIntent) in voiceCommands) {

@@ -36,7 +36,12 @@ class MyraBackgroundScheduler(private val context: Context) {
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val workManager: WorkManager = WorkManager.getInstance(context)
+    private val workManager: WorkManager? = try {
+        WorkManager.getInstance(context)
+    } catch (e: Exception) {
+        Log.w(TAG, "WorkManager unavailable (e.g. test environment): ${e.message}")
+        null
+    }
     private val scope = CoroutineScope(Dispatchers.Main)
 
     private val _isSchedulerEnabled = MutableStateFlow(prefs.getBoolean(PREF_ENABLED, true))
@@ -62,8 +67,8 @@ class MyraBackgroundScheduler(private val context: Context) {
 
     private fun observeWorkManagerStatus() {
         try {
-            workManager.getWorkInfosForUniqueWorkLiveData(PERIODIC_WORK_NAME)
-                .observeForever { workInfos ->
+            workManager?.getWorkInfosForUniqueWorkLiveData(PERIODIC_WORK_NAME)
+                ?.observeForever { workInfos ->
                     val info = workInfos?.firstOrNull()
                     if (info != null) {
                         _workStatus.value = info.state.name
@@ -118,7 +123,7 @@ class MyraBackgroundScheduler(private val context: Context) {
             .addTag("myra_ai_orchestration")
             .build()
 
-        workManager.enqueueUniquePeriodicWork(
+        workManager?.enqueueUniquePeriodicWork(
             PERIODIC_WORK_NAME,
             ExistingPeriodicWorkPolicy.UPDATE,
             workRequest
@@ -132,7 +137,7 @@ class MyraBackgroundScheduler(private val context: Context) {
     fun cancelPeriodicOrchestration() {
         prefs.edit().putBoolean(PREF_ENABLED, false).apply()
         _isSchedulerEnabled.value = false
-        workManager.cancelUniqueWork(PERIODIC_WORK_NAME)
+        workManager?.cancelUniqueWork(PERIODIC_WORK_NAME)
         _workStatus.value = "CANCELLED"
         Log.i(TAG, "Cancelled periodic background orchestration.")
     }
@@ -150,7 +155,7 @@ class MyraBackgroundScheduler(private val context: Context) {
             .addTag("myra_immediate_orchestration")
             .build()
 
-        workManager.enqueueUniqueWork(
+        workManager?.enqueueUniqueWork(
             ONE_TIME_WORK_NAME,
             ExistingWorkPolicy.REPLACE,
             request

@@ -144,6 +144,10 @@ fun AssistantScreen(
     val isHandsFreeVoiceEnabled by viewModel.isHandsFreeVoiceEnabled.collectAsStateWithLifecycle()
     val selectedSpeechLanguage by viewModel.selectedSpeechLanguage.collectAsStateWithLifecycle()
 
+    val isTtsSpeaking by viewModel.isTtsSpeaking.collectAsStateWithLifecycle()
+    val isVoiceOutputEnabled by viewModel.isVoiceOutputEnabled.collectAsStateWithLifecycle()
+    val ttsSpeechRate by viewModel.ttsSpeechRate.collectAsStateWithLifecycle()
+
     var hasMicPermission by remember {
         mutableStateOf(viewModel.permissionManager.hasMicrophonePermission())
     }
@@ -240,6 +244,11 @@ fun AssistantScreen(
             onToggleHandsFreeVoice = { viewModel.setHandsFreeVoiceEnabled(it) },
             onSelectSpeechLanguage = { viewModel.setSpeechLanguage(it) },
             onRequestMicrophonePermission = { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+            isVoiceOutputEnabled = isVoiceOutputEnabled,
+            ttsSpeechRate = ttsSpeechRate,
+            onToggleVoiceOutput = { viewModel.setVoiceOutputEnabled(it) },
+            onChangeTtsSpeechRate = { viewModel.setTtsSpeechRate(it) },
+            onTestVoiceOutput = { viewModel.speakText("नमस्ते! मैं मायरा हूँ, आपकी एआई सहायक।", force = true) },
             onDismiss = { showSettingsDialog = false }
         )
     }
@@ -458,7 +467,12 @@ fun AssistantScreen(
                         contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp)
                     ) {
                         items(messages, key = { it.id }) { msg ->
-                            MessageBubble(message = msg)
+                            MessageBubble(
+                                message = msg,
+                                isSpeaking = isTtsSpeaking,
+                                onSpeak = { text -> viewModel.speakText(text, force = true) },
+                                onStopSpeaking = { viewModel.stopSpeaking() }
+                            )
                         }
                     }
                 }
@@ -477,6 +491,12 @@ fun AssistantScreen(
                     )
                 }
             }
+
+            // Live Voice Output (Speaking) Banner
+            LiveVoiceSpeakingBanner(
+                isSpeaking = isTtsSpeaking,
+                onStopSpeaking = { viewModel.stopSpeaking() }
+            )
 
             // Live Speech-to-Text & Hands-Free Listening Banner
             LiveVoiceListeningBanner(
@@ -763,7 +783,12 @@ fun SuggestionChipsRow(
 }
 
 @Composable
-fun MessageBubble(message: MessageEntity) {
+fun MessageBubble(
+    message: MessageEntity,
+    isSpeaking: Boolean = false,
+    onSpeak: ((String) -> Unit)? = null,
+    onStopSpeaking: (() -> Unit)? = null
+) {
     val isUser = message.isUser
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val containerColor = if (isUser) {
@@ -855,13 +880,27 @@ fun MessageBubble(message: MessageEntity) {
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = timeStr,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                        color = contentColor.copy(alpha = 0.7f),
-                        modifier = Modifier.align(Alignment.End)
-                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (!isUser) {
+                            VoiceSpeakerIconButton(
+                                isCurrentSpeaking = isSpeaking,
+                                onSpeak = { onSpeak?.invoke(message.text) },
+                                onStop = { onStopSpeaking?.invoke() }
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.width(1.dp))
+                        }
+                        Text(
+                            text = timeStr,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                            color = contentColor.copy(alpha = 0.7f)
+                        )
+                    }
                 }
             }
         }

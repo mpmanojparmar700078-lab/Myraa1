@@ -406,5 +406,64 @@ class ExampleRobolectricTest {
 
     com.example.services.GeminiRateLimiter.resetForTesting()
   }
+
+  @Test
+  fun `test text to speech cleaner sanitizes markdown and technical formatting`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val ttsManager = com.example.voice.TextToSpeechManager(context)
+
+    // Markdown bold, italic, headers, bullet points
+    val rawMarkdown = """
+      # Myra Assistant
+      **नमस्ते!** I have executed *your command*.
+      - Step 1: Open app
+      - Step 2: Search video
+      Here is the link: https://youtube.com/watch?v=12345
+      ```
+      val code = "hidden"
+      ```
+      Status: {success: true}
+    """.trimIndent()
+
+    val cleaned = ttsManager.cleanTextForSpeech(rawMarkdown)
+
+    // Assert that formatting symbols are stripped
+    assertEquals(false, cleaned.contains("**"))
+    assertEquals(false, cleaned.contains("#"))
+    assertEquals(false, cleaned.contains("https://"))
+    assertEquals(false, cleaned.contains("val code"))
+    assertEquals(false, cleaned.contains("{"))
+    assertEquals(false, cleaned.contains("}"))
+    assertEquals(true, cleaned.contains("नमस्ते! I have executed your command."))
+  }
+
+  @Test
+  fun `test memory repository voice output preferences`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(
+      context,
+      com.example.data.MyraDatabase::class.java
+    ).allowMainThreadQueries().build()
+
+    val memoryRepo = com.example.data.MemoryRepository(
+      messageDao = db.messageDao(),
+      preferenceDao = db.preferenceDao(),
+      interactionHistoryDao = db.interactionHistoryDao(),
+      context = context
+    )
+
+    // Default should be true
+    assertEquals(true, memoryRepo.isVoiceOutputEnabled())
+
+    // Update to false
+    memoryRepo.setVoiceOutputEnabled(false)
+    assertEquals(false, memoryRepo.isVoiceOutputEnabled())
+
+    // Update speech rate
+    memoryRepo.setTtsSpeechRate(1.2f)
+    assertEquals(1.2f, memoryRepo.getTtsSpeechRate(), 0.01f)
+
+    db.close()
+  }
 }
 

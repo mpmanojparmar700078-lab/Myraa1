@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -460,5 +462,126 @@ fun VoiceMicButton(
                 }
             }
         }
+    }
+}
+
+/**
+ * Banner displayed when Myra is actively speaking response text aloud.
+ * Shows animated speaking indicator and a quick "Stop" button.
+ */
+@Composable
+fun LiveVoiceSpeakingBanner(
+    isSpeaking: Boolean,
+    onStopSpeaking: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = isSpeaking,
+        enter = fadeIn(animationSpec = tween(200)) + expandVertically(),
+        exit = fadeOut(animationSpec = tween(150)) + shrinkVertically(),
+        modifier = modifier
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+                .testTag("voice_speaking_banner"),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VolumeUp,
+                            contentDescription = "Myra is speaking",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column {
+                        Text(
+                            text = "मायरा बोल रही है... (Speaking)",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        VoiceVisualizerWaveform(
+                            soundLevel = 55f,
+                            isListening = true
+                        )
+                    }
+                }
+
+                FilledTonalButton(
+                    onClick = onStopSpeaking,
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    modifier = Modifier.testTag("stop_speaking_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Stop,
+                        contentDescription = "Stop",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("रोकें", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Small speaker button on assistant message cards to re-read / speak out loud.
+ */
+@Composable
+fun VoiceSpeakerIconButton(
+    isCurrentSpeaking: Boolean,
+    onSpeak: () -> Unit,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FilledIconButton(
+        onClick = {
+            if (isCurrentSpeaking) onStop() else onSpeak()
+        },
+        shape = CircleShape,
+        modifier = modifier
+            .size(32.dp)
+            .testTag("bubble_speak_button"),
+        colors = IconButtonDefaults.filledIconButtonColors(
+            containerColor = if (isCurrentSpeaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (isCurrentSpeaking) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    ) {
+        Icon(
+            imageVector = if (isCurrentSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+            contentDescription = if (isCurrentSpeaking) "Stop Speaking" else "Listen to Response",
+            modifier = Modifier.size(16.dp)
+        )
     }
 }

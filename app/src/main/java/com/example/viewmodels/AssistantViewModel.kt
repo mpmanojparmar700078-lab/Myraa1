@@ -14,6 +14,8 @@ import com.example.services.MyraAssistantForegroundService
 import com.example.voice.SpeechLanguage
 import com.example.voice.SpeechState
 import com.example.voice.SpeechToTextManager
+import com.example.voice.TextToSpeechManager
+import com.example.voice.TtsState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -112,6 +114,14 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     val selectedSpeechLanguage: StateFlow<SpeechLanguage> = speechToTextManager.selectedLanguage
     val isSpeechRecognitionAvailable: Boolean = speechToTextManager.isRecognitionAvailable()
 
+    // Text-to-Speech (TTS) Voice Output Engine
+    val textToSpeechManager = TextToSpeechManager(application)
+    val isTtsSpeaking: StateFlow<Boolean> = textToSpeechManager.isSpeaking
+    val ttsState: StateFlow<TtsState> = textToSpeechManager.ttsState
+    val isVoiceOutputEnabled: StateFlow<Boolean> = textToSpeechManager.voiceOutputEnabled
+    private val _ttsSpeechRate = MutableStateFlow(memoryRepository.getTtsSpeechRate())
+    val ttsSpeechRate: StateFlow<Float> = _ttsSpeechRate.asStateFlow()
+
     init {
         // Start foreground service if enabled
         if (memoryRepository.isForegroundServiceEnabled()) {
@@ -119,6 +129,18 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         }
         speechToTextManager.setHandsFreeEnabled(memoryRepository.isHandsFreeVoiceEnabled())
         speechToTextManager.setSelectedLanguage(SpeechLanguage.fromCode(memoryRepository.getVoiceLanguage()))
+
+        // Initialize voice output preferences and bind assistant responses to TTS speech
+        textToSpeechManager.setVoiceOutputEnabled(memoryRepository.isVoiceOutputEnabled())
+        textToSpeechManager.setSpeechRate(memoryRepository.getTtsSpeechRate())
+        textToSpeechManager.setPitch(memoryRepository.getTtsPitch())
+
+        assistantService.onAssistantResponseCallback = { replyText ->
+            if (textToSpeechManager.voiceOutputEnabled.value) {
+                textToSpeechManager.speak(replyText)
+            }
+        }
+
         loadInstalledApps()
     }
 
@@ -314,8 +336,34 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         speechToTextManager.setSelectedLanguage(language)
     }
 
+    // Voice Output & Text-to-Speech (TTS) Action Handlers
+    fun speakText(text: String, force: Boolean = true) {
+        textToSpeechManager.speak(text, forceIfDisabled = force)
+    }
+
+    fun stopSpeaking() {
+        textToSpeechManager.stop()
+    }
+
+    fun setVoiceOutputEnabled(enabled: Boolean) {
+        memoryRepository.setVoiceOutputEnabled(enabled)
+        textToSpeechManager.setVoiceOutputEnabled(enabled)
+    }
+
+    fun setTtsSpeechRate(rate: Float) {
+        _ttsSpeechRate.value = rate
+        memoryRepository.setTtsSpeechRate(rate)
+        textToSpeechManager.setSpeechRate(rate)
+    }
+
+    fun setTtsPitch(pitch: Float) {
+        memoryRepository.setTtsPitch(pitch)
+        textToSpeechManager.setPitch(pitch)
+    }
+
     override fun onCleared() {
         super.onCleared()
         speechToTextManager.destroy()
+        textToSpeechManager.shutdown()
     }
 }

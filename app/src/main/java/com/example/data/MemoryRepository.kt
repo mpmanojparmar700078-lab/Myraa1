@@ -22,6 +22,9 @@ class MemoryRepository(
         const val KEY_LANGUAGE = "preferred_language"
         const val PREF_HANDS_FREE_ENABLED = "hands_free_voice_enabled"
         const val PREF_VOICE_LANGUAGE = "voice_speech_language"
+        const val PREF_VOICE_OUTPUT_ENABLED = "voice_output_enabled"
+        const val PREF_TTS_SPEECH_RATE = "tts_speech_rate"
+        const val PREF_TTS_PITCH = "tts_pitch"
     }
 
     val messages: Flow<List<MessageEntity>> = messageDao.getAllMessages()
@@ -188,6 +191,30 @@ class MemoryRepository(
 
     fun setVoiceLanguage(languageCode: String) {
         prefs.edit().putString(PREF_VOICE_LANGUAGE, languageCode).apply()
+    }
+
+    fun isVoiceOutputEnabled(): Boolean {
+        return prefs.getBoolean(PREF_VOICE_OUTPUT_ENABLED, true)
+    }
+
+    fun setVoiceOutputEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(PREF_VOICE_OUTPUT_ENABLED, enabled).apply()
+    }
+
+    fun getTtsSpeechRate(): Float {
+        return prefs.getFloat(PREF_TTS_SPEECH_RATE, 1.0f)
+    }
+
+    fun setTtsSpeechRate(rate: Float) {
+        prefs.edit().putFloat(PREF_TTS_SPEECH_RATE, rate).apply()
+    }
+
+    fun getTtsPitch(): Float {
+        return prefs.getFloat(PREF_TTS_PITCH, 1.0f)
+    }
+
+    fun setTtsPitch(pitch: Float) {
+        prefs.edit().putFloat(PREF_TTS_PITCH, pitch).apply()
     }
 }
 

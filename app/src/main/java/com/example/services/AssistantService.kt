@@ -88,6 +88,12 @@ class AssistantService(
     private val _currentActionProgress = MutableStateFlow<ActionProgressUpdate?>(null)
     val currentActionProgress = _currentActionProgress.asStateFlow()
 
+    /**
+     * Optional callback triggered whenever the assistant produces a final user-facing response.
+     * Used by TextToSpeechManager to speak responses aloud in voice output mode.
+     */
+    var onAssistantResponseCallback: ((String) -> Unit)? = null
+
     private var currentRequestJob: kotlinx.coroutines.Job? = null
     private val currentRequestId = java.util.concurrent.atomic.AtomicLong(0)
     private var lastProcessedInput: String = ""
@@ -124,6 +130,7 @@ class AssistantService(
                     text = cancelMsg,
                     result = ActionResult(success = false, message = cancelMsg)
                 )
+                onAssistantResponseCallback?.invoke(cancelMsg)
                 delay(1000L)
                 if (currentRequestId.get() == cancelledRequestId) {
                     _assistantState.value = AssistantState.IDLE
@@ -390,6 +397,7 @@ class AssistantService(
                     intent = intent,
                     result = actionResult
                 )
+                onAssistantResponseCallback?.invoke(replyText)
                 memoryRepository.recordInteraction(
                     userQuery = userQuery,
                     assistantResponse = replyText,
@@ -453,6 +461,7 @@ class AssistantService(
                     intent = intent,
                     result = actionResult
                 )
+                onAssistantResponseCallback?.invoke(replyText)
                 memoryRepository.recordInteraction(
                     userQuery = userQuery,
                     assistantResponse = replyText,
@@ -486,6 +495,7 @@ class AssistantService(
                     intent = intent,
                     result = result
                 )
+                onAssistantResponseCallback?.invoke(replyText)
                 memoryRepository.recordInteraction(
                     userQuery = userQuery,
                     assistantResponse = replyText,
@@ -518,6 +528,7 @@ class AssistantService(
             text = errorMessage,
             result = result
         )
+        onAssistantResponseCallback?.invoke(errorMessage)
         memoryRepository.recordInteraction(
             userQuery = userQuery,
             assistantResponse = errorMessage,

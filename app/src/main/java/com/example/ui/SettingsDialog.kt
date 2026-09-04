@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -114,6 +115,11 @@ fun SettingsDialog(
     onToggleHandsFreeVoice: ((Boolean) -> Unit)? = null,
     onSelectSpeechLanguage: ((com.example.voice.SpeechLanguage) -> Unit)? = null,
     onRequestMicrophonePermission: (() -> Unit)? = null,
+    isVoiceOutputEnabled: Boolean = true,
+    ttsSpeechRate: Float = 1.0f,
+    onToggleVoiceOutput: ((Boolean) -> Unit)? = null,
+    onChangeTtsSpeechRate: ((Float) -> Unit)? = null,
+    onTestVoiceOutput: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     var apiKeyInput by remember { mutableStateOf(customApiKey) }
@@ -905,6 +911,72 @@ fun SettingsDialog(
                                             )
                                         }
                                     )
+                                }
+                            }
+                        }
+
+                        // Voice Output (Text-to-Speech) Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "बोलकर जवाब दें (Voice Output)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Myra speaks response out loud in Hindi & English",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = isVoiceOutputEnabled,
+                                onCheckedChange = { onToggleVoiceOutput?.invoke(it) },
+                                modifier = Modifier.testTag("voice_output_switch")
+                            )
+                        }
+
+                        // Voice Output Speed
+                        if (isVoiceOutputEnabled) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = "आवाज की गति (Speech Speed)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf(0.85f to "0.85x", 1.0f to "1.0x (Normal)", 1.2f to "1.2x").forEach { (rate, label) ->
+                                        FilterChip(
+                                            selected = kotlin.math.abs(ttsSpeechRate - rate) < 0.05f,
+                                            onClick = { onChangeTtsSpeechRate?.invoke(rate) },
+                                            label = { Text(label, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+
+                                // Test voice button
+                                OutlinedButton(
+                                    onClick = { onTestVoiceOutput?.invoke() },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp)
+                                        .testTag("test_voice_button"),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.VolumeUp,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("आवाज टेस्ट करें (Hear Sample Voice)", fontSize = 12.sp)
                                 }
                             }
                         }
