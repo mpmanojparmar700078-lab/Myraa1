@@ -850,6 +850,32 @@ class ExampleUnitTest {
             assertEquals("Intent for '$transcript' must match expected", expectedIntent, result.intent)
         }
     }
+
+    @Test
+    fun test_WeatherQuery_InLocalCommandParser() {
+        val parser = LocalCommandParser()
+
+        val weatherQueries = listOf(
+            "Aaj ka hmari current location ka weather btao",
+            "Mausam kaisa hai",
+            "Current weather report",
+            "Delhi ka mausam kaisa hai"
+        )
+
+        for (query in weatherQueries) {
+            val result = parser.parse(query)
+            assertTrue("Query '$query' should be recognized", result.recognized)
+            assertEquals("Query '$query' should route to PUBLIC_API", IntentType.PUBLIC_API, result.intent)
+            assertNotNull("Parsed intent must not be null", result.parsedIntent)
+        }
+
+        val delhiResult = parser.parse("Delhi ka mausam kaisa hai")
+        assertEquals("wttr_in", delhiResult.parsedIntent?.apiId)
+        assertEquals("Delhi", delhiResult.parsedIntent?.apiParams?.get("location"))
+
+        val genericResult = parser.parse("Aaj ka hmari current location ka weather btao")
+        assertEquals("open_meteo", genericResult.parsedIntent?.apiId)
+    }
 }
 
 

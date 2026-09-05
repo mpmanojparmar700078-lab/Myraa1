@@ -199,7 +199,7 @@ class ApiResponseParser {
                 val temp = extracted["temperature"]?.toString() ?: "--"
                 val hum = extracted["humidity"]?.toString() ?: "--"
                 val wind = extracted["windSpeed"]?.toString() ?: "--"
-                "Current Weather:\n• Temperature: $temp°C\n• Humidity: $hum%\n• Wind: $wind km/h"
+                "आज का मौसम:\n• तापमान: $temp°C\n• नमी (Humidity): $hum%\n• हवा की गति: $wind km/h"
             }
 
             "wttr_in" -> {
@@ -207,7 +207,8 @@ class ApiResponseParser {
                 val desc = extracted["description"]?.toString() ?: ""
                 val hum = extracted["humidity"]?.toString() ?: "--"
                 val wind = extracted["windSpeed"]?.toString() ?: "--"
-                "Weather ($desc):\n• Temperature: $temp°C\n• Humidity: $hum%\n• Wind: $wind km/h"
+                val descText = if (desc.isNotBlank()) " ($desc)" else ""
+                "मौसम रिपोर्ट$descText:\n• तापमान: $temp°C\n• नमी (Humidity): $hum%\n• हवा की गति: $wind km/h"
             }
 
             "rest_countries" -> {

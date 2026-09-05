@@ -49,6 +49,10 @@ class LocalCommandParser {
         val greetingResult = parseGreetings(lower)
         if (greetingResult != null) return greetingResult
 
+        // 2b. Weather Queries (Level 1 Public API / Fast Weather Routing)
+        val weatherResult = parseWeatherQuery(cleanedInput, lower)
+        if (weatherResult != null) return weatherResult
+
         // 3. Language / Memory Preferences
         val preferenceResult = parsePreferences(cleanedInput, lower)
         if (preferenceResult != null) return preferenceResult
@@ -579,6 +583,84 @@ class LocalCommandParser {
         }
 
         return null
+    }
+
+    /**
+     * Dedicated Weather intent parser (Level 1 Fast Public API Routing).
+     * Handles queries like:
+     * - "Aaj ka hmari current location ka weather btao"
+     * - "Weather kaisa hai"
+     * - "Mausam kaisa hai"
+     * - "What's the weather today"
+     * - "Weather in Mumbai"
+     */
+    private fun parseWeatherQuery(original: String, lower: String): LocalCommandResult? {
+        // If user explicitly asks Google / Web search, or asks for songs/videos/recommendations, do NOT intercept
+        val isExplicitSearch = lower.contains("google") || lower.contains("गूगल") ||
+                lower.startsWith("search ") || lower.contains(" search करो") ||
+                lower.contains(" search kro") || lower.contains(" search karo")
+        if (isExplicitSearch) return null
+
+        val isSongOrCreative = lower.contains("गाना") || lower.contains("gaana") || lower.contains("song") ||
+                lower.contains("video") || lower.contains("वीडियो") || lower.contains("ढूंढो") ||
+                lower.contains("suno") || lower.contains("सुनो") || lower.contains("सुनाओ")
+        if (isSongOrCreative) return null
+
+        val isWeatherMention = lower.contains("weather") || lower.contains("मौसम") ||
+                lower.contains("mausam") || lower.contains("तापमान") || lower.contains("temperature")
+        if (!isWeatherMention) return null
+
+        // Must look like an inquiry about current/forecast weather
+        val isWeatherInquiry = lower.contains("kaisa") || lower.contains("कैसा") || lower.contains("kese") ||
+                lower.contains("btao") || lower.contains("batao") || lower.contains("बताओ") ||
+                lower.contains("today") || lower.contains("aaj") || lower.contains("आज") ||
+                lower.contains("current") || lower.contains("report") || lower.contains("forecast") ||
+                lower.contains("in ") || lower.contains("mein") || lower.contains("में") ||
+                lower.contains("par") || lower.contains("का") || lower.contains("ka") ||
+                lower.trim() == "weather" || lower.trim() == "मौसम" || lower.trim() == "mausam"
+        if (!isWeatherInquiry) return null
+
+        // Check if a specific city is explicitly mentioned (e.g., "weather in Delhi", "mumbai ka mausam")
+        val cityPatterns = listOf(
+            Regex("""(?:weather\s+in|weather\s+of)\s+([a-zA-Z\u0900-\u097F]+)""", RegexOption.IGNORE_CASE),
+            Regex("""([a-zA-Z\u0900-\u097F]+)\s*(?:ka\s+mausam|का\s+मौसम)""", RegexOption.IGNORE_CASE),
+            Regex("""([a-zA-Z\u0900-\u097F]+)\s+weather""", RegexOption.IGNORE_CASE)
+        )
+
+        var detectedCity: String? = null
+        val nonCityWords = setOf(
+            "aaj", "today", "current", "location", "hamari", "hmari", "mera", "yaha", "yahan",
+            "kaisa", "hai", "btao", "batao", "report", "ki", "ka", "me", "mein", "par", "the"
+        )
+        for (pattern in cityPatterns) {
+            val match = pattern.find(lower)
+            if (match != null && match.groupValues.size > 1) {
+                val candidate = match.groupValues[1].trim()
+                if (candidate !in nonCityWords) {
+                    detectedCity = candidate.replaceFirstChar { it.uppercase() }
+                    break
+                }
+            }
+        }
+
+        val targetApiId = if (detectedCity != null) "wttr_in" else "open_meteo"
+        val params = if (detectedCity != null) mapOf("location" to detectedCity) else emptyMap()
+        val responseIntro = if (detectedCity != null) "$detectedCity का मौसम जाँचा जा रहा है…" else "वर्तमान स्थान का मौसम जाँचा जा रहा है…"
+
+        return LocalCommandResult(
+            recognized = true,
+            intent = IntentType.PUBLIC_API,
+            parsedIntent = ParsedIntent(
+                type = IntentType.PUBLIC_API,
+                query = original,
+                apiId = targetApiId,
+                apiParams = params,
+                responseText = responseIntro
+            ),
+            parameters = params,
+            confidence = 1.0f,
+            reason = "Fast local weather routing to $targetApiId"
+        )
     }
 
     private fun parseNavigation(lower: String): LocalCommandResult? {
@@ -1156,6 +1238,7 @@ class LocalCommandParser {
         return parseClearChat(lower)
             ?: parsePreferences(cleaned, lower)
             ?: parseContextQuery(cleaned, lower)
+            ?: parseWeatherQuery(cleaned, lower)
             ?: parseWebsiteIntent(cleaned, lower)
             ?: parseYouTubeSearchAndPlay(cleaned, lower)
             ?: parseFollowUpCommand(cleaned, lower)

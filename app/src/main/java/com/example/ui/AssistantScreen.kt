@@ -174,7 +174,7 @@ fun AssistantScreen(
     }
 
     var inputText by remember { mutableStateOf("") }
-    var showSettingsDialog by remember { mutableStateOf(false) }
+    var showSettingsScreen by remember { mutableStateOf(false) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var showInstalledAppsSheet by remember { mutableStateOf(false) }
     var showApiExplorerDialog by remember { mutableStateOf(false) }
@@ -214,8 +214,8 @@ fun AssistantScreen(
         )
     }
 
-    if (showSettingsDialog) {
-        SettingsDialog(
+    if (showSettingsScreen) {
+        SettingsScreen(
             customApiKey = customApiKey,
             isServiceEnabled = serviceEnabled,
             isAccessibilityEnabled = isAccessibilityEnabled,
@@ -249,8 +249,19 @@ fun AssistantScreen(
             onToggleVoiceOutput = { viewModel.setVoiceOutputEnabled(it) },
             onChangeTtsSpeechRate = { viewModel.setTtsSpeechRate(it) },
             onTestVoiceOutput = { viewModel.speakText("नमस्ते! मैं मायरा हूँ, आपकी एआई सहायक।", force = true) },
-            onDismiss = { showSettingsDialog = false }
+            onOpenInstalledApps = {
+                viewModel.loadInstalledApps()
+                showInstalledAppsSheet = true
+            },
+            onOpenApiCatalog = {
+                showApiExplorerDialog = true
+            },
+            onClearAllData = {
+                viewModel.clearChatHistory()
+            },
+            onNavigateBack = { showSettingsScreen = false }
         )
+        return
     }
 
     if (showClearConfirmDialog) {
@@ -293,56 +304,29 @@ fun AssistantScreen(
                         MyraOrbAvatar(state = assistantState)
 
                         Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 Text(
                                     text = "Myra",
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
                                 AssistantStatusBadge(state = assistantState)
                             }
                             Text(
                                 text = "Persistent AI Assistant Layer (V2)",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
                             )
                         }
                     }
                 },
                 actions = {
                     IconButton(
-                        onClick = { showApiExplorerDialog = true },
-                        modifier = Modifier.testTag("public_apis_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Public,
-                            contentDescription = "Public APIs"
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            viewModel.loadInstalledApps()
-                            showInstalledAppsSheet = true
-                        },
-                        modifier = Modifier.testTag("installed_apps_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Apps,
-                            contentDescription = "Installed Apps"
-                        )
-                    }
-                    IconButton(
-                        onClick = { showClearConfirmDialog = true },
-                        modifier = Modifier.testTag("clear_conversation_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ClearAll,
-                            contentDescription = "Clear Conversation"
-                        )
-                    }
-                    IconButton(
-                        onClick = { showSettingsDialog = true },
+                        onClick = { showSettingsScreen = true },
                         modifier = Modifier.testTag("settings_button")
                     ) {
                         Icon(
@@ -367,13 +351,6 @@ fun AssistantScreen(
             SuggestionChipsRow(
                 onSelectChip = { query ->
                     viewModel.sendCommand(query)
-                },
-                onOpenAppsSheet = {
-                    viewModel.loadInstalledApps()
-                    showInstalledAppsSheet = true
-                },
-                onOpenApiExplorer = {
-                    showApiExplorerDialog = true
                 }
             )
 
@@ -448,12 +425,8 @@ fun AssistantScreen(
                 if (messages.isEmpty()) {
                     EmptyConversationState(
                         onSuggestionClick = { viewModel.sendCommand(it) },
-                        onOpenAppsSheet = {
-                            viewModel.loadInstalledApps()
-                            showInstalledAppsSheet = true
-                        },
-                        onOpenApiExplorer = {
-                            showApiExplorerDialog = true
+                        onOpenSettings = {
+                            showSettingsScreen = true
                         },
                         onStartVoice = handleVoiceClick
                     )
@@ -671,7 +644,7 @@ fun AssistantStatusBadge(state: AssistantState) {
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -684,9 +657,11 @@ fun AssistantStatusBadge(state: AssistantState) {
             }
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                 color = textColor,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
@@ -694,9 +669,7 @@ fun AssistantStatusBadge(state: AssistantState) {
 
 @Composable
 fun SuggestionChipsRow(
-    onSelectChip: (String) -> Unit,
-    onOpenAppsSheet: () -> Unit,
-    onOpenApiExplorer: () -> Unit = {}
+    onSelectChip: (String) -> Unit
 ) {
     val suggestions = listOf(
         "Tell me a joke",
@@ -718,42 +691,6 @@ fun SuggestionChipsRow(
             .padding(horizontal = 16.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        InputChip(
-            selected = false,
-            onClick = onOpenApiExplorer,
-            label = { Text("🌐 Public APIs", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Default.Public,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            },
-            colors = InputChipDefaults.inputChipColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
-            ),
-            modifier = Modifier.testTag("suggestion_chip_public_apis")
-        )
-
-        InputChip(
-            selected = false,
-            onClick = onOpenAppsSheet,
-            label = { Text("📱 Installed Apps", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Default.Apps,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            },
-            colors = InputChipDefaults.inputChipColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-            ),
-            modifier = Modifier.testTag("suggestion_chip_apps_list")
-        )
-
         suggestions.forEach { chipText ->
             InputChip(
                 selected = false,
