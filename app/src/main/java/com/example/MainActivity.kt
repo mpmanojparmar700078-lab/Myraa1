@@ -27,13 +27,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
         setContent {
             MyApplicationTheme {
-                // Request POST_NOTIFICATIONS permission on Android 13+ (API 33+)
                 val notificationPermissionLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.RequestPermission(),
-                    onResult = { /* Handled gracefully */ }
-                )
+                    contract = ActivityResultContracts.RequestPermission()
+                ) {}
+
+                val audioPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) {}
 
                 LaunchedEffect(Unit) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -44,6 +47,14 @@ class MainActivity : ComponentActivity() {
                         ) {
                             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
+                    }
+
+                    if (ContextCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.RECORD_AUDIO
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 }
 
@@ -67,4 +78,3 @@ class MainActivity : ComponentActivity() {
         viewModel.onAppBackgrounded()
     }
 }
-

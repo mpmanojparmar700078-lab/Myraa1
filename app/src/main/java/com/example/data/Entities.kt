@@ -3,10 +3,10 @@ package com.example.data
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "assistant_messages")
+@Entity(tableName = "messages")
 data class MessageEntity(
     @PrimaryKey(autoGenerate = true)
-    val id: Long = 0,
+    val id: Long = 0L,
     val text: String,
     val isUser: Boolean,
     val timestamp: Long = System.currentTimeMillis(),
@@ -27,7 +27,7 @@ data class UserPreferenceEntity(
 @Entity(tableName = "interaction_history")
 data class InteractionHistoryEntity(
     @PrimaryKey(autoGenerate = true)
-    val id: Long = 0,
+    val id: Long = 0L,
     val userQuery: String,
     val assistantResponse: String,
     val intentType: String? = null,
@@ -41,4 +41,3 @@ data class InteractionHistoryEntity(
     val latencyMs: Long = 0L,
     val timestamp: Long = System.currentTimeMillis()
 )
-

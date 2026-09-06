@@ -5,21 +5,23 @@ import android.content.SharedPreferences
 import com.example.models.ActionResult
 import com.example.models.ParsedIntent
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.map
 
 class MemoryRepository(
     private val messageDao: MessageDao,
     private val preferenceDao: PreferenceDao,
-    private val interactionHistoryDao: InteractionHistoryDao? = null,
+    private val interactionHistoryDao: InteractionHistoryDao,
     context: Context
 ) {
     private val prefs: SharedPreferences = context.getSharedPreferences("myra_settings", Context.MODE_PRIVATE)
 
+    val messages: Flow<List<MessageEntity>> = messageDao.getAllMessages()
+    val allPreferences: Flow<List<UserPreferenceEntity>> = preferenceDao.getAllPreferences()
+    val interactionHistory: Flow<List<InteractionHistoryEntity>> = interactionHistoryDao.getAllHistory()
+
     companion object {
+        const val KEY_LANGUAGE = "preferred_language"
         const val PREF_CUSTOM_API_KEY = "custom_gemini_api_key"
         const val PREF_SERVICE_ENABLED = "foreground_service_enabled"
-        const val KEY_LANGUAGE = "preferred_language"
         const val PREF_HANDS_FREE_ENABLED = "hands_free_voice_enabled"
         const val PREF_VOICE_LANGUAGE = "voice_speech_language"
         const val PREF_VOICE_OUTPUT_ENABLED = "voice_output_enabled"
@@ -27,16 +29,11 @@ class MemoryRepository(
         const val PREF_TTS_PITCH = "tts_pitch"
     }
 
-    val messages: Flow<List<MessageEntity>> = messageDao.getAllMessages()
-    val allPreferences: Flow<List<UserPreferenceEntity>> = preferenceDao.getAllPreferences()
-    val interactionHistory: Flow<List<InteractionHistoryEntity>> =
-        interactionHistoryDao?.getAllHistory() ?: emptyFlow()
-
-    suspend fun saveUserMessage(text: String): Long {
+    suspend fun saveUserMessage(text: String, language: String? = null): Long {
         val entity = MessageEntity(
             text = text,
             isUser = true,
-            timestamp = System.currentTimeMillis()
+            language = language
         )
         return messageDao.insertMessage(entity)
     }
@@ -50,18 +47,14 @@ class MemoryRepository(
         val entity = MessageEntity(
             text = text,
             isUser = false,
-            timestamp = System.currentTimeMillis(),
             actionType = intent?.type?.name,
-            actionTarget = intent?.app ?: intent?.query ?: intent?.target ?: intent?.key,
+            actionTarget = intent?.target ?: intent?.app ?: result?.launchedTarget,
             actionSuccess = result?.success,
             language = language
         )
         return messageDao.insertMessage(entity)
     }
 
-    /**
-     * Stores structured user interaction and context in the Room history table.
-     */
     suspend fun recordInteraction(
         userQuery: String,
         assistantResponse: String,
@@ -74,91 +67,41 @@ class MemoryRepository(
         language: String? = null,
         latencyMs: Long = 0L
     ): Long {
-        if (interactionHistoryDao == null) return -1L
-        val historyItem = InteractionHistoryEntity(
+        val entity = InteractionHistoryEntity(
             userQuery = userQuery,
             assistantResponse = assistantResponse,
             intentType = intent?.type?.name,
-            intentTarget = intent?.app ?: intent?.query ?: intent?.target ?: intent?.key,
+            intentTarget = intent?.target ?: intent?.app ?: result?.launchedTarget,
             actionSuccess = result?.success ?: true,
             executionSource = executionSource,
             contextEntity = contextEntity,
             contextTopic = contextTopic,
             contextVariables = contextVariables,
             language = language,
-            latencyMs = latencyMs,
-            timestamp = System.currentTimeMillis()
+            latencyMs = latencyMs
         )
-        return interactionHistoryDao.insertInteraction(historyItem)
-    }
-
-    suspend fun getRecentInteractions(limit: Int = 20): List<InteractionHistoryEntity> {
-        return interactionHistoryDao?.getRecentInteractions(limit) ?: emptyList()
-    }
-
-    fun searchInteractions(query: String): Flow<List<InteractionHistoryEntity>> {
-        return interactionHistoryDao?.searchHistory(query) ?: emptyFlow()
-    }
-
-    fun getInteractionsByTopic(topic: String): Flow<List<InteractionHistoryEntity>> {
-        return interactionHistoryDao?.getHistoryByTopic(topic) ?: emptyFlow()
-    }
-
-    suspend fun deleteInteraction(id: Long) {
-        interactionHistoryDao?.deleteInteraction(id)
-    }
-
-    suspend fun clearInteractionHistory() {
-        interactionHistoryDao?.clearAllHistory()
+        return interactionHistoryDao.insertInteraction(entity)
     }
 
     suspend fun clearHistory() {
         messageDao.clearAllMessages()
-        interactionHistoryDao?.clearAllHistory()
+    }
+
+    suspend fun clearInteractionHistory() {
+        interactionHistoryDao.clearAllHistory()
     }
 
     suspend fun setPreference(key: String, value: String) {
-        preferenceDao.setPreference(UserPreferenceEntity(key = key, value = value, updatedAt = System.currentTimeMillis()))
+        preferenceDao.setPreference(UserPreferenceEntity(key = key, value = value))
+        prefs.edit().putString(key, value).apply()
     }
 
     suspend fun getPreference(key: String): String? {
-        return preferenceDao.getPreference(key)
+        return preferenceDao.getPreference(key) ?: prefs.getString(key, null)
     }
 
     suspend fun getSavedLanguage(): String {
-        return preferenceDao.getPreference(KEY_LANGUAGE) ?: "auto"
-    }
-
-    suspend fun getRecentMessages(limit: Int = 10): List<MessageEntity> {
-        return messageDao.getRecentMessages(limit)
-    }
-
-    suspend fun buildMemoryContextString(): String {
-        val lang = preferenceDao.getPreference(KEY_LANGUAGE) ?: "auto"
-        val recentMsgs = messageDao.getRecentMessages(10).reversed()
-        val recentInteractions = interactionHistoryDao?.getRecentInteractions(5)?.reversed() ?: emptyList()
-
-        val sb = StringBuilder()
-        sb.append("Current saved user preferences:\n")
-        sb.append("- Preferred language: $lang\n")
-
-        if (recentInteractions.isNotEmpty()) {
-            sb.append("\nPAST INTERACTION CONTEXT & ENTITIES:\n")
-            for (item in recentInteractions) {
-                val entityInfo = item.contextEntity?.let { " [Active Entity: $it]" } ?: ""
-                val topicInfo = item.contextTopic?.let { " [Topic: $it]" } ?: ""
-                sb.append("- User: ${item.userQuery} -> Myra (${item.executionSource}): ${item.assistantResponse}$entityInfo$topicInfo\n")
-            }
-        }
-
-        if (recentMsgs.isNotEmpty()) {
-            sb.append("\nRECENT CONVERSATION HISTORY (In order):\n")
-            for (msg in recentMsgs) {
-                val role = if (msg.isUser) "User" else "Myra"
-                sb.append("- $role: ${msg.text}\n")
-            }
-        }
-        return sb.toString()
+        return getPreference(KEY_LANGUAGE) ?: "hi_en"
     }
 
     fun getCustomApiKey(): String {
@@ -166,7 +109,7 @@ class MemoryRepository(
     }
 
     fun setCustomApiKey(key: String) {
-        prefs.edit().putString(PREF_CUSTOM_API_KEY, key.trim()).apply()
+        prefs.edit().putString(PREF_CUSTOM_API_KEY, key).apply()
     }
 
     fun isForegroundServiceEnabled(): Boolean {
@@ -178,7 +121,7 @@ class MemoryRepository(
     }
 
     fun isHandsFreeVoiceEnabled(): Boolean {
-        return prefs.getBoolean(PREF_HANDS_FREE_ENABLED, true)
+        return prefs.getBoolean(PREF_HANDS_FREE_ENABLED, false)
     }
 
     fun setHandsFreeVoiceEnabled(enabled: Boolean) {
@@ -217,4 +160,3 @@ class MemoryRepository(
         prefs.edit().putFloat(PREF_TTS_PITCH, pitch).apply()
     }
 }
-

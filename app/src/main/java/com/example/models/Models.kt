@@ -1,14 +1,6 @@
 package com.example.models
 
-enum class AssistantState(val label: String, val descriptionHindi: String, val descriptionEnglish: String) {
-    IDLE("Idle", "तैयार (Ready)", "Ready for commands"),
-    PROCESSING("Processing", "सोच रही हूँ…", "Analyzing intent with AI…"),
-    EXECUTING_ACTION("Executing Action", "एक्शन चला रही हूँ…", "Executing Android action…"),
-    BACKGROUND_READY("Background Active", "बैकग्राउंड में सक्रिय", "Active in background"),
-    CANCELLING("Cancelling", "रद्द हो रहा है…", "Cancelling active task…"),
-    CANCELLED("Cancelled", "रद्द किया गया", "Request cancelled"),
-    ERROR("Error", "त्रुटि (Error)", "Action or connection issue")
-}
+import android.graphics.drawable.Drawable
 
 enum class IntentType {
     OPEN_APP,
@@ -27,29 +19,12 @@ enum class IntentType {
     UNKNOWN
 }
 
-data class LocalCommandResult(
-    val recognized: Boolean,
-    val intent: IntentType? = null,
-    val parsedIntent: ParsedIntent? = null,
-    val parameters: Map<String, Any> = emptyMap(),
-    val confidence: Float = 0.0f,
-    val reason: String = ""
-)
-
-enum class ActionStepStatus {
-    PENDING,
-    STARTED,
-    COMPLETED,
-    FAILED,
-    SKIPPED
-}
-
-data class ActionProgressUpdate(
-    val currentStep: Int,
-    val totalSteps: Int,
-    val stepTitle: String,
-    val status: ActionStepStatus,
-    val detailMessage: String
+data class ActionResult(
+    val success: Boolean,
+    val message: String,
+    val launchedTarget: String? = null,
+    val error: String? = null,
+    val stepResults: List<ActionResult> = emptyList()
 )
 
 data class ParsedIntent(
@@ -67,10 +42,32 @@ data class ParsedIntent(
     val confidence: Float = 1.0f
 )
 
-data class ActionResult(
-    val success: Boolean,
-    val message: String,
-    val launchedTarget: String? = null,
-    val error: String? = null,
-    val stepResults: List<ActionResult> = emptyList()
+enum class AssistantState(
+    val label: String,
+    val descriptionHindi: String,
+    val descriptionEnglish: String
+) {
+    IDLE("Idle", "तैयार (Ready)", "Ready for commands"),
+    PROCESSING("Processing", "सोच रही हूँ…", "Analyzing intent with AI…"),
+    EXECUTING_ACTION("Executing Action", "एक्शन चला रही हूँ…", "Executing Android action…"),
+    BACKGROUND_READY("Background Active", "बैकग्राउंड में सक्रिय", "Active in background"),
+    CANCELLING("Cancelling", "रद्द हो रहा है…", "Cancelling active task…"),
+    CANCELLED("Cancelled", "रद्द किया गया", "Request cancelled"),
+    ERROR("Error", "त्रुटि (Error)", "Action or connection issue")
+}
+
+data class LocalCommandResult(
+    val handled: Boolean,
+    val intent: ParsedIntent? = null,
+    val actionResult: ActionResult? = null,
+    val responseText: String? = null,
+    val confidence: Float = 1.0f,
+    val reason: String? = null
+)
+
+data class InstalledAppInfo(
+    val appName: String,
+    val packageName: String,
+    val isSystemApp: Boolean = false,
+    val icon: Drawable? = null
 )

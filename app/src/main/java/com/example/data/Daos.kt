@@ -8,20 +8,20 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MessageDao {
-    @Query("SELECT * FROM assistant_messages ORDER BY timestamp ASC")
+    @Query("SELECT * FROM messages ORDER BY timestamp ASC")
     fun getAllMessages(): Flow<List<MessageEntity>>
 
-    @Query("SELECT * FROM assistant_messages ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM messages ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentMessages(limit: Int = 10): List<MessageEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity): Long
 
-    @Query("DELETE FROM assistant_messages")
-    suspend fun clearAllMessages()
-
-    @Query("DELETE FROM assistant_messages WHERE id = :messageId")
+    @Query("DELETE FROM messages WHERE id = :messageId")
     suspend fun deleteMessage(messageId: Long)
+
+    @Query("DELETE FROM messages")
+    suspend fun clearAllMessages()
 }
 
 @Dao
@@ -41,16 +41,16 @@ interface PreferenceDao {
 
 @Dao
 interface InteractionHistoryDao {
-    @Query("SELECT * FROM interaction_history ORDER BY timestamp DESC, id DESC")
+    @Query("SELECT * FROM interaction_history ORDER BY timestamp DESC")
     fun getAllHistory(): Flow<List<InteractionHistoryEntity>>
 
-    @Query("SELECT * FROM interaction_history ORDER BY timestamp DESC, id DESC LIMIT :limit")
+    @Query("SELECT * FROM interaction_history ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentInteractions(limit: Int = 20): List<InteractionHistoryEntity>
 
-    @Query("SELECT * FROM interaction_history WHERE contextTopic = :topic ORDER BY timestamp DESC, id DESC")
+    @Query("SELECT * FROM interaction_history WHERE contextTopic = :topic ORDER BY timestamp DESC")
     fun getHistoryByTopic(topic: String): Flow<List<InteractionHistoryEntity>>
 
-    @Query("SELECT * FROM interaction_history WHERE userQuery LIKE '%' || :query || '%' OR assistantResponse LIKE '%' || :query || '%' OR contextEntity LIKE '%' || :query || '%' ORDER BY timestamp DESC, id DESC")
+    @Query("SELECT * FROM interaction_history WHERE userQuery LIKE '%' || :query || '%' OR assistantResponse LIKE '%' || :query || '%'")
     fun searchHistory(query: String): Flow<List<InteractionHistoryEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -62,5 +62,3 @@ interface InteractionHistoryDao {
     @Query("DELETE FROM interaction_history")
     suspend fun clearAllHistory()
 }
-
-

@@ -2,10 +2,10 @@
     <string name="app_name">Myra</string>
     <string name="assistant_title">Myra</string>
     <string name="assistant_subtitle">Personal AI Assistant</string>
-    <string name="input_placeholder">Type a command or ask Myra… (e.g. YouTube खोलो)</string>
-    <string name="service_notification_title">Myra Assistant is Active</string>
-    <string name="service_notification_text">Ready for background actions and commands</string>
+    <string name="assistant_description">Allows Myra to read visible interface information and perform supported actions when you explicitly ask it to.</string>
     <string name="accessibility_service_label">Myra Accessibility Service</string>
     <string name="accessibility_service_description">Allows Myra to read visible interface information and perform supported actions when you explicitly ask it to.</string>
+    <string name="service_notification_title">Myra Assistant is Active</string>
+    <string name="service_notification_text">Ready for background actions and commands</string>
+    <string name="input_placeholder">Type a command or ask Myra… (e.g. YouTube खोलो)</string>
 </resources>
-
