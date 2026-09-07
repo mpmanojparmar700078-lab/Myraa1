@@ -17,19 +17,39 @@ class LocalCommandParser {
 
         val normalized = normalizeText(trimmed)
 
-        // 0. Check Multi-command (e.g. "... aur ...")
-        val multiResult = checkMultiCommand(trimmed)
-        if (multiResult != null) {
-            return multiResult
+        // 1. User Feedback & Failure Reporting ("nahi hua", "ye nahi hua", "fail hua", etc.)
+        // Must be checked FIRST before any action or search intent!
+        val failureFeedbackResult = checkFailureAndCorrection(normalized, trimmed)
+        if (failureFeedbackResult != null) {
+            return failureFeedbackResult
         }
 
-        // 1. Context Questions & Status Queries (Must be checked BEFORE search/actions)
+        // 2. Context Questions & Reference Queries ("1 wale me tumne kya kiya", "mene kya bola", etc.)
         val contextResult = checkContextAndConversationQuestions(normalized)
         if (contextResult != null) {
             return contextResult
         }
 
-        // 2. Cancel request
+        // 3. Meta Instructions ("me chahta hu vo sare steps youtube par ho or vo tum khud kro")
+        // Must be evaluated before YouTube search to avoid converting instructions into search queries!
+        val metaResult = checkMetaInstruction(normalized, trimmed)
+        if (metaResult != null) {
+            return metaResult
+        }
+
+        // 4. Challenge / Autonomous Test Requests ("tumhari marji se koi random target pura karo jisme kam se kam 6 steps hona chahiye")
+        val challengeResult = checkChallengeRequest(normalized)
+        if (challengeResult != null) {
+            return challengeResult
+        }
+
+        // 5. Multi-command check (e.g. "... aur ...")
+        val multiResult = checkMultiCommand(trimmed)
+        if (multiResult != null) {
+            return multiResult
+        }
+
+        // 6. Cancel request
         if (matchesAny(normalized, listOf("cancel", "cancel karo", "rok do", "rehne do", "radd karo", "रद्द करो", "रहने दो", "रोक दो", "stop action", "stop"))) {
             return LocalCommandResult(
                 handled = true,
@@ -38,7 +58,7 @@ class LocalCommandParser {
             )
         }
 
-        // 3. Clear chat
+        // 7. Clear chat
         if (matchesAny(normalized, listOf("clear chat", "chat clear karo", "chat saaf karo", "delete chat", "clear history", "saaf karo", "चैट साफ़ करो"))) {
             return LocalCommandResult(
                 handled = true,
@@ -48,7 +68,7 @@ class LocalCommandParser {
             )
         }
 
-        // 4. Greetings & Identity
+        // 8. Greetings & Identity
         if (matchesAny(normalized, listOf("hi", "hello", "hey", "namaste", "नमस्ते", "हेलो", "myra", "myra kaun ho", "tum kaun ho", "who are you"))) {
             val reply = "नमस्ते! मैं Myra हूँ, आपकी पर्सनल AI असिस्टेंट। मैं ऐप्स खोलने, YouTube, सर्च और नेविगेशन में आपकी मदद कर सकती हूँ।"
             return LocalCommandResult(
@@ -67,7 +87,7 @@ class LocalCommandParser {
             )
         }
 
-        // 5. Navigation: Back / Home / Recents
+        // 9. Navigation: Back / Home / Recents
         if (matchesAny(normalized, listOf("go back", "back jao", "back", "peeche jao", "wapas jao", "wapas", "पीछे जाओ", "वापस"))) {
             return LocalCommandResult(
                 handled = true,
@@ -84,7 +104,7 @@ class LocalCommandParser {
             )
         }
 
-        // 6. Scroll navigation
+        // 10. Scroll navigation
         if (matchesAny(normalized, listOf("scroll down", "neeche karo", "neeche scroll karo", "neeche jao", "नीचे करो", "नीचे स्क्रॉल करो"))) {
             return LocalCommandResult(
                 handled = true,
@@ -101,7 +121,7 @@ class LocalCommandParser {
             )
         }
 
-        // 7. Read screen
+        // 11. Read screen
         if (matchesAny(normalized, listOf("read screen", "screen padho", "screen par kya hai", "kya dikh raha hai", "स्क्रीन पढ़ो"))) {
             return LocalCommandResult(
                 handled = true,
@@ -110,7 +130,7 @@ class LocalCommandParser {
             )
         }
 
-        // 8. Media controls: Play / Pause / Stop
+        // 12. Media controls: Play / Pause / Stop
         val isPauseCommand = listOf("pause video", "pause song", "pause", "video roko", "gaana roko", "ruk jao", "पॉज़ करो", "रोको")
             .any { normalized == it || normalized.startsWith("$it ") }
         if (isPauseCommand) {
@@ -131,7 +151,7 @@ class LocalCommandParser {
             )
         }
 
-        // 9. Camera
+        // 13. Camera
         if (normalized.contains("camera") || normalized.contains("कैमरा") || normalized.contains("photo khincho") || normalized.contains("फोटो खींचो")) {
             if (hasLaunchSemantics(normalized) || normalized == "camera" || normalized == "कैमरा") {
                 return LocalCommandResult(
@@ -142,7 +162,7 @@ class LocalCommandParser {
             }
         }
 
-        // 10. Dialer
+        // 14. Dialer
         if (normalized.contains("dialer") || normalized.contains("phone dialer") || normalized.contains("डायलर") || normalized.contains("call lagao") || normalized.contains("phone milao")) {
             return LocalCommandResult(
                 handled = true,
@@ -151,7 +171,7 @@ class LocalCommandParser {
             )
         }
 
-        // 11. Settings
+        // 15. Settings
         if (normalized.contains("settings") || normalized.contains("सेटिंग्स") || normalized.contains("setting")) {
             if (hasLaunchSemantics(normalized) || normalized == "settings" || normalized == "setting") {
                 return LocalCommandResult(
@@ -162,25 +182,25 @@ class LocalCommandParser {
             }
         }
 
-        // 12. YouTube Search & Play (With robust query extraction)
+        // 16. YouTube Search & Play (With robust query extraction)
         val ytResult = parseYouTubeCommand(trimmed, normalized)
         if (ytResult != null) {
             return ytResult
         }
 
-        // 13. Chrome & Specific Web Page opening
+        // 17. Chrome & Specific Web Page opening
         val chromeResult = parseChromeCommand(trimmed, normalized)
         if (chromeResult != null) {
             return chromeResult
         }
 
-        // 14. Check App Launch Intent for installed apps
+        // 18. Check App Launch Intent for installed apps
         val appLaunchResult = checkAppLaunch(normalized, trimmed)
         if (appLaunchResult != null) {
             return appLaunchResult
         }
 
-        // 15. Direct URL
+        // 19. Direct URL
         if (normalized.startsWith("http://") || normalized.startsWith("https://") || (normalized.startsWith("www.") && normalized.contains("."))) {
             return LocalCommandResult(
                 handled = true,
@@ -189,7 +209,7 @@ class LocalCommandParser {
             )
         }
 
-        // 16. Web Search
+        // 20. Web Search
         if (normalized.startsWith("search ") || normalized.startsWith("google ") || normalized.contains("search karo") || normalized.contains("सर्च करो") || normalized.contains("dhoondho") || normalized.contains("khojo")) {
             val query = extractSearchQuery(trimmed)
             if (query.isNotEmpty()) {
@@ -202,6 +222,156 @@ class LocalCommandParser {
         }
 
         return LocalCommandResult(handled = false, reason = "No local pattern matched")
+    }
+
+    /**
+     * Detects user feedback about failure or incorrect interpretation of the previous request.
+     * Must NEVER be parsed as a YouTube or web search!
+     */
+    private fun checkFailureAndCorrection(normalized: String, original: String): LocalCommandResult? {
+        val failurePhrases = listOf(
+            "nahi hua", "kuch nahi hua", "ye nahi hua", "fail hua", "fail ho gaya",
+            "kaam nahi hua", "nahi chala", "video nahi chala", "chala nahi",
+            "kuch bhi nahi hua", "not working", "didn't work", "failed",
+            "नहीं हुआ", "कुछ नहीं हुआ", "फेल हो गया", "फेल हुआ"
+        )
+        if (failurePhrases.any { normalized == it || normalized.startsWith("$it ") || normalized.endsWith(" $it") }) {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.REPORT_FAILURE,
+                    userCorrection = "nahi hua",
+                    confidence = 1.0f
+                ),
+                responseText = "माफ़ कीजिए कि पिछला काम पूरा नहीं हुआ। मैंने इसे असफलता के रूप में रिकॉर्ड कर लिया है। आप 'दोबारा करो' कह सकते हैं।"
+            )
+        }
+
+        val correctionPhrases = listOf(
+            "maine search karne ko nahi kaha tha", "maine search karne ko nahi bola tha",
+            "maine search nahi bola tha", "maine search karne ko nahi bola",
+            "ye nahi kaha tha", "ye nahi bola tha", "maine yeh nahi kah raha tha",
+            "main yeh nahi kah raha tha", "galat hai", "ye galat hai", "wrong hai",
+            "galat interpret kiya", "maine aisa nahi bola tha"
+        )
+        if (correctionPhrases.any { normalized.contains(it) }) {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.CORRECT_PREVIOUS_RESULT,
+                    userCorrection = original,
+                    confidence = 1.0f
+                ),
+                responseText = "माफ़ कीजिए, मेरी समझने में गलती हुई। मैंने इसे ठीक कर लिया है और भविष्य के लिए अपनी समझ को अपडेट कर लिया है।"
+            )
+        }
+
+        return null
+    }
+
+    /**
+     * Distinguishes Meta Instructions (how Myra should behave) from actual concrete actions.
+     * Examples:
+     * - "me chahta hu vo sare steps youtube par ho or vo tum khud kro"
+     * - "main chahta hu tum ye kaam khud karo"
+     * - "youtube par jo karna hai vo tum khud karo"
+     * - "main chahta hu ki tum khud saare steps karo"
+     * - "mujhe manually kuch nahi karna"
+     * - "tum khud karo"
+     * - "tum apne aap karo"
+     */
+    private fun checkMetaInstruction(normalized: String, original: String): LocalCommandResult? {
+        val hasPreferenceClue = listOf("chahta hu", "chahti hu", "chahata hu", "want", "चाहता हूँ", "चाहती हूँ")
+            .any { normalized.contains(it) }
+
+        val hasAutonomousClue = listOf(
+            "tum khud", "khud kro", "khud karo", "apne aap", "automatically", "manually kuch nahi",
+            "tum khud hi", "khud se", "tum khud ye", "tum khud saare", "tum khud sare"
+        ).any { normalized.contains(it) }
+
+        val hasStepsClue = listOf("sare steps", "saare steps", "all steps", "jo karna hai", "jo bhi steps")
+            .any { normalized.contains(it) }
+
+        // If user says "tum khud karo" / "tum apne aap karo"
+        val isDirectAutonomousInstruction = matchesAny(
+            normalized,
+            listOf(
+                "tum khud karo", "tum khud kro", "tum apne aap karo", "tum khud karo na",
+                "tum khud kar do", "khud karo", "apne aap karo", "tum khud ye kaam karo",
+                "sare steps tum khud karo", "saare steps tum khud karo"
+            )
+        )
+
+        val isMetaPattern = isDirectAutonomousInstruction ||
+                (hasPreferenceClue && (hasAutonomousClue || hasStepsClue)) ||
+                (hasAutonomousClue && hasStepsClue)
+
+        if (!isMetaPattern) return null
+
+        // Check if there is also a concrete action (e.g. video to play or app to launch)
+        // Example: "main chahta hu tum khud YouTube kholo aur Desi Gamer ka video play karo"
+        val hasPlayOrAppAction = listOf("play", "chalao", "chala do", "kholo", "search", "dhoondho", "khojo")
+            .any { normalized.contains(it) }
+
+        // Check if there is an actual video/song target (excluding the meta words themselves)
+        val stripped = stripMetaWords(normalized)
+            .replace("youtube", "")
+            .replace("par", "")
+            .replace("pe", "")
+            .replace("mein", "")
+            .replace("me", "")
+            .replace("ho", "")
+            .replace("or", "")
+            .replace("aur", "")
+            .replace("kro", "")
+            .replace("karo", "")
+            .trim()
+
+        // If only meta words or no concrete query exists: Pure Meta Instruction!
+        if (stripped.length <= 3 || stripped == "steps" || stripped == "sare" || stripped == "video" || stripped == "app") {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.META_INSTRUCTION,
+                    metaInstruction = "ASSISTANT_SHOULD_PERFORM_AVAILABLE_STEPS_AUTOMATICALLY",
+                    executionPreference = "PERFORM_STEPS_AUTOMATICALLY",
+                    confidence = 1.0f
+                ),
+                responseText = "समझ गई। अब से मैं उपलब्ध सभी स्टेप्स अपने आप (automatically) पूरे करने की कोशिश करूँगी।"
+            )
+        }
+
+        // If there IS a concrete action attached, let parseYouTubeCommand / appLauncher handle the action,
+        // but with meta-instruction extracted and meta words stripped from the query!
+        return null
+    }
+
+    /**
+     * Detects Challenge / Autonomous Test Requests.
+     * Example: "tumhari marji se koi random target pura karo jisme kam se kam 6 steps hona chahiye"
+     */
+    private fun checkChallengeRequest(normalized: String): LocalCommandResult? {
+        val hasChallengeClue = listOf(
+            "random target", "random task", "koi target", "koi random", "challenge",
+            "apni marzi se", "tumhari marji se", "tumhari marzi se", "self test", "test task"
+        ).any { normalized.contains(it) }
+
+        val hasStepsOrActionClue = listOf(
+            "step", "steps", "pura karo", "karo", "kro", "perform karo", "step hona", "steps hona"
+        ).any { normalized.contains(it) }
+
+        if (hasChallengeClue && hasStepsOrActionClue) {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.CHALLENGE_REQUEST,
+                    confidence = 1.0f
+                ),
+                responseText = "चैलेंज स्वीकार किया गया! 6-स्टेप्स का सुरक्षित ऑटोनॉमस वर्कफ़्लो निष्पादित किया जा रहा है..."
+            )
+        }
+
+        return null
     }
 
     private fun checkMultiCommand(trimmed: String): LocalCommandResult? {
@@ -245,18 +415,47 @@ class LocalCommandParser {
             )
         }
 
-        // B. REPORT_LAST_EXECUTION
+        // B. REPORT_LAST_EXECUTION & ITEM RESOLUTION ("1 wale me tumne kya kiya", "tumne kya kiya", "usme kya hua")
         val reportPhrases = listOf(
             "tumne kya kiya", "kya kiya tumne", "tumne kya kya kiya", "tumne kya kara",
             "hua kya", "kaam hua", "kya hua", "status kya hai", "kya status hai",
             "what did you do", "did it work", "तुमने क्या किया", "हुआ क्या", "काम हुआ",
-            "kuch hua", "complete hua", "kya bana"
+            "kuch hua", "complete hua", "kya bana", "usme kya hua", "usme kya kiya"
         )
-        if (reportPhrases.any { normalized == it || normalized.startsWith("$it ") || normalized.endsWith(" $it") || normalized.contains(it) }) {
+
+        val hasReportClue = reportPhrases.any {
+            normalized == it || normalized.startsWith("$it ") || normalized.endsWith(" $it") || normalized.contains(it)
+        }
+
+        // Check if referencing a specific numbered item: e.g. "1 wale me tumne kya kiya", "2nd wale me kya hua"
+        val indexMatch = Regex("(?i)\\b(1|2|3|4|5|pehla|pehle|pahla|pahle|dusra|dusre|doosra|doosre|teesra|teesre|first|second|third)\\s*(wale|waale|me|mein)?\\b")
+            .find(normalized)
+
+        val targetIndex = if (indexMatch != null) {
+            when (indexMatch.groupValues[1].lowercase()) {
+                "1", "pehla", "pehle", "pahla", "pahle", "first" -> 1
+                "2", "dusra", "dusre", "doosra", "doosre", "second" -> 2
+                "3", "teesra", "teesre", "third" -> 3
+                "4" -> 4
+                "5" -> 5
+                else -> 1
+            }
+        } else null
+
+        if (hasReportClue || targetIndex != null) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.REPORT_LAST_EXECUTION, confidence = 1.0f),
-                responseText = "पिछले एक्शन की स्थिति जाँची जा रही है।"
+                intent = ParsedIntent(
+                    type = IntentType.REPORT_LAST_EXECUTION,
+                    targetIndex = targetIndex,
+                    referenceType = if (targetIndex != null) "INDEX" else "LAST",
+                    confidence = 1.0f
+                ),
+                responseText = if (targetIndex != null) {
+                    "अनुरोध #$targetIndex की स्थिति जाँची जा रही है।"
+                } else {
+                    "पिछले एक्शन की स्थिति जाँची जा रही है।"
+                }
             )
         }
 
@@ -322,6 +521,9 @@ class LocalCommandParser {
 
         // Clean extraction of query
         var query = original
+
+        // Strip any meta instruction phrases if combined (e.g. "main chahta hu tum khud...")
+        query = stripMetaWords(query)
 
         // 1. Remove youtube reference and platform prepositions
         query = query.replace(Regex("(?i)\\b(in\\s+youtube|on\\s+youtube|youtube\\s*(par|pe|mein|me|ko|on|in|per)?|yt\\s*(par|pe|mein|me)?|यूट्यूब\\s*(पर|में)?)\\b"), " ")
@@ -415,6 +617,21 @@ class LocalCommandParser {
             .trim()
     }
 
+    private fun stripMetaWords(text: String): String {
+        val metaPatterns = listOf(
+            "(?i)\\b(main\\s+chahta\\s+hu|me\\s+chahta\\s+hu|chahta\\s+hu|chahti\\s+hu|i\\s+want)\\b",
+            "(?i)\\b(tum\\s+khud|tum\\s+khud\\s+hi|khud\\s+kro|khud\\s+karo|khud|automatically|apne\\s+aap)\\b",
+            "(?i)\\b(sare\\s+steps|saare\\s+steps|all\\s+steps|jo\\s+bhi\\s+steps|steps)\\b",
+            "(?i)\\b(kripya|please|zara|mujhe)\\b",
+            "(?i)\\b(vo|wo|jo|ki|or|aur)\\b"
+        )
+        var result = text
+        for (p in metaPatterns) {
+            result = result.replace(Regex(p), " ")
+        }
+        return result.replace(Regex("\\s+"), " ").trim()
+    }
+
     private fun matchesAny(text: String, patterns: List<String>): Boolean {
         return patterns.any { text == it || text.startsWith("$it ") || text.endsWith(" $it") }
     }
@@ -487,4 +704,3 @@ class LocalCommandParser {
             .trim()
     }
 }
-

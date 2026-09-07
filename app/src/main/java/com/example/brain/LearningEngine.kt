@@ -50,13 +50,43 @@ class LearningEngine(
         }
 
         // Only verified outcomes should strengthen skill confidence; intermediate or partial action success is not request success
-        val success = actionResult.success && (chainResult?.success ?: true) && !actionResult.partial && (actionResult.isVerified || decision.source == DecisionSource.LOCAL_PARSER)
+        val success = actionResult.success && (chainResult?.success ?: true) && !actionResult.partial && actionResult.isVerified
 
         if (success) {
             handleSuccess(userQuery, normalizedQuery, decision, actionResult, chainResult, screenSnapshot)
         } else {
             handleFailure(userQuery, normalizedQuery, decision, actionResult, chainResult, screenSnapshot)
         }
+    }
+
+    suspend fun recordCorrection(
+        userQuery: String,
+        normalizedQuery: String,
+        wrongIntentType: String,
+        userCorrection: String
+    ) {
+        Log.w(TAG, "[LEARNING] User corrected previous command: '$normalizedQuery' (wrongly parsed as $wrongIntentType)")
+        val existing = memoryRepository.findExactExperience(normalizedQuery)
+        if (existing != null) {
+            val updated = existing.copy(
+                confidence = max(0.0f, existing.confidence - 0.40f),
+                failureCount = existing.failureCount + 1,
+                resultSuccess = false,
+                failureReason = "User corrected misclassification: $userCorrection",
+                lastUsedTimestamp = System.currentTimeMillis()
+            )
+            memoryRepository.updateExperience(updated)
+        }
+
+        val failed = FailedStrategyEntity(
+            pattern = normalizedQuery,
+            failedAction = wrongIntentType,
+            target = null,
+            screenPackage = null,
+            reason = "Misinterpreted intent: $userCorrection",
+            lastFailedTimestamp = System.currentTimeMillis()
+        )
+        memoryRepository.recordFailedStrategy(failed)
     }
 
     private suspend fun handleSuccess(

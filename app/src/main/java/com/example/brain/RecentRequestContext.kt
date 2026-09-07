@@ -1,6 +1,7 @@
 package com.example.brain
 
 import com.example.models.ActionResult
+import com.example.models.IntentType
 import com.example.models.ParsedIntent
 import com.example.models.RequestResult
 import com.example.models.RequestState
@@ -33,10 +34,15 @@ data class RecordedRequest(
     var currentState: RequestState = RequestState.RECEIVED,
     var finalResult: RequestResult? = null,
     val tasks: List<RecordedTask> = emptyList(),
+    var wasMisinterpreted: Boolean = false,
+    var isSearchOnlyStarted: Boolean = false,
+    var metaInstruction: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
-class RecentRequestContext {
+class RecentRequestContext(
+    private val resultReporter: ResultReporter = ResultReporter()
+) {
     private val history = ConcurrentLinkedDeque<RecordedRequest>()
     private val maxHistorySize = 25
 
@@ -48,7 +54,8 @@ class RecentRequestContext {
         targetApp: String?,
         query: String?,
         plannedActions: List<String>,
-        tasks: List<RecordedTask> = emptyList()
+        tasks: List<RecordedTask> = emptyList(),
+        metaInstruction: String? = null
     ): RecordedRequest {
         val req = RecordedRequest(
             requestId = requestId,
@@ -59,7 +66,8 @@ class RecentRequestContext {
             query = query,
             plannedActions = plannedActions,
             currentState = RequestState.RECEIVED,
-            tasks = tasks
+            tasks = tasks,
+            metaInstruction = metaInstruction ?: intent.metaInstruction
         )
         history.addLast(req)
         while (history.size > maxHistorySize) {
@@ -73,15 +81,49 @@ class RecentRequestContext {
         state: RequestState,
         result: RequestResult? = null,
         completedAction: String? = null,
-        failedAction: String? = null
+        failedAction: String? = null,
+        isSearchOnlyStarted: Boolean = false,
+        wasMisinterpreted: Boolean = false
     ) {
         val req = history.find { it.requestId == requestId } ?: return
         req.currentState = state
+        if (isSearchOnlyStarted) req.isSearchOnlyStarted = true
+        if (wasMisinterpreted) req.wasMisinterpreted = true
         if (result != null) {
             req.finalResult = result
         }
         completedAction?.let { req.completedActions.add(it) }
         failedAction?.let { req.failedActions.add(it) }
+    }
+
+    fun markLastRequestFailed(reason: String = "User feedback: operation not completed") {
+        val last = getLastRequest() ?: return
+        last.currentState = RequestState.FAILED
+        val prevResult = last.finalResult
+        last.finalResult = (prevResult ?: RequestResult(
+            requestId = last.requestId,
+            state = RequestState.FAILED,
+            summary = "काम पूरा नहीं हुआ",
+            failureReason = reason
+        )).copy(state = RequestState.FAILED, failureReason = reason)
+    }
+
+    fun markLastRequestMisinterpreted(correction: String) {
+        val last = getLastRequest() ?: return
+        last.wasMisinterpreted = true
+        last.currentState = RequestState.FAILED
+        val prevResult = last.finalResult
+        last.finalResult = (prevResult ?: RequestResult(
+            requestId = last.requestId,
+            state = RequestState.FAILED,
+            summary = "कमांड को गलत समझा गया था",
+            wasMisinterpreted = true,
+            failureReason = "Intent misclassified: $correction"
+        )).copy(
+            state = RequestState.FAILED,
+            wasMisinterpreted = true,
+            failureReason = "Intent misclassified: $correction"
+        )
     }
 
     fun getLastRequest(): RecordedRequest? {
@@ -90,6 +132,11 @@ class RecentRequestContext {
 
     fun getRecentRequests(count: Int = 5): List<RecordedRequest> {
         return history.toList().takeLast(count).reversed()
+    }
+
+    fun getRequestByRecallIndex(index: Int): RecordedRequest? {
+        val recents = getRecentRequests(10)
+        return if (index in 1..recents.size) recents[index - 1] else null
     }
 
     fun formatRecallMessage(): String {
@@ -104,6 +151,23 @@ class RecentRequestContext {
             }
             sb.toString().trimEnd()
         }
+    }
+
+    fun formatExecutionReportForIndex(index: Int): String {
+        val req = getRequestByRecallIndex(index)
+            ?: return "अनुरोध #$index इतिहास में नहीं मिला।"
+        return resultReporter.formatReportForRequest(
+            rawCommand = req.rawUserCommand,
+            intent = req.intent,
+            state = req.currentState,
+            result = req.finalResult,
+            targetApp = req.targetApp,
+            query = req.query,
+            wasMisinterpreted = req.wasMisinterpreted,
+            isSearchOnlyStarted = req.isSearchOnlyStarted,
+            metaInstruction = req.metaInstruction,
+            itemIndex = index
+        )
     }
 
     fun formatLastExecutionReport(): String {
@@ -126,29 +190,17 @@ class RecentRequestContext {
             return sb.toString().trimEnd()
         }
 
-        val result = last.finalResult
-        return when (last.currentState) {
-            RequestState.SUCCESS -> {
-                "काम पूरा हुआ: ${result?.summary ?: "अनुरोध सफलतापूर्वक पूरा और सत्यापित हुआ।"}"
-            }
-            RequestState.PARTIAL_SUCCESS -> {
-                val target = last.targetApp?.replaceFirstChar { it.uppercase() } ?: "ऐप"
-                val query = last.query?.let { " '$it'" } ?: ""
-                "मैंने $target खोला और$query खोजने की कोशिश की, लेकिन अंतिम परिणाम (playback/page) verify नहीं हो पाया।"
-            }
-            RequestState.FAILED -> {
-                "काम पूरा नहीं हो सका: ${result?.failureReason ?: "स्क्रीन पर आवश्यक एलिमेंट नहीं मिला या परमिशन उपलब्ध नहीं थी।"}"
-            }
-            RequestState.CANCELLED -> {
-                "पिछला अनुरोध रद्द कर दिया गया था।"
-            }
-            RequestState.EXECUTING, RequestState.WAITING_FOR_SCREEN, RequestState.VERIFYING -> {
-                "पिछला अनुरोध अभी चल रहा है (${last.currentState})।"
-            }
-            else -> {
-                "पिछली कमांड: \"${last.rawUserCommand}\" (स्थिति: ${last.currentState})"
-            }
-        }
+        return resultReporter.formatReportForRequest(
+            rawCommand = last.rawUserCommand,
+            intent = last.intent,
+            state = last.currentState,
+            result = last.finalResult,
+            targetApp = last.targetApp,
+            query = last.query,
+            wasMisinterpreted = last.wasMisinterpreted,
+            isSearchOnlyStarted = last.isSearchOnlyStarted,
+            metaInstruction = last.metaInstruction
+        )
     }
 
     fun formatLastFailureExplanation(): String {

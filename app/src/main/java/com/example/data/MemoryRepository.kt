@@ -318,4 +318,12 @@ class MemoryRepository(
     fun setGeminiFallbackEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(PREF_GEMINI_FALLBACK_ENABLED, enabled).apply()
     }
+
+    fun getAssistantPreference(key: String, defaultValue: String = ""): String {
+        return prefs.getString("pref_meta_$key", defaultValue) ?: defaultValue
+    }
+
+    fun setAssistantPreference(key: String, value: String) {
+        prefs.edit().putString("pref_meta_$key", value).apply()
+    }
 }

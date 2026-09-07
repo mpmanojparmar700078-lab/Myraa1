@@ -301,4 +301,87 @@ class MyraBrainUnitTest {
         val redacted = PrivacyFilter.redactSensitive("password: mySecretPass123")
         assertTrue(redacted.contains("[REDACTED]"))
     }
+
+    // Test 13: Meta Instruction ("me chahta hu vo sare steps youtube par ho or vo tum khud kro")
+    // Must NOT be classified as SEARCH_YOUTUBE or launch search!
+    @Test
+    fun test13_MetaInstruction_NotSearchingYouTube() {
+        val metaCommand = "me chahta hu vo sare steps youtube par ho or vo tum khud kro"
+        val res = parser.parse(metaCommand)
+        assertTrue("Expected handled", res.handled)
+        assertNotNull(res.intent)
+        assertEquals("Must be classified as META_INSTRUCTION", IntentType.META_INSTRUCTION, res.intent?.type)
+        assertFalse("Must NOT be SEARCH_AND_PLAY", res.intent?.type == IntentType.SEARCH_AND_PLAY)
+        assertFalse("Must NOT be YOUTUBE_SEARCH", res.intent?.type == IntentType.YOUTUBE_SEARCH)
+    }
+
+    // Test 14: Context Recall for Specific Index ("1 wale me tumne kya kiya")
+    @Test
+    fun test14_ContextResolution_1WaleMeTumneKyaKiya() {
+        val cmd = "1 wale me tumne kya kiya"
+        val res = parser.parse(cmd)
+        assertTrue("Expected handled", res.handled)
+        assertNotNull(res.intent)
+        assertEquals(IntentType.REPORT_LAST_EXECUTION, res.intent?.type)
+        assertEquals(1, res.intent?.targetIndex)
+
+        // Test RecentRequestContext lookup with index
+        val context = RecentRequestContext()
+        context.recordNewRequest(
+            requestId = 101L,
+            rawCommand = "youtube par video play karo",
+            normalizedCommand = "youtube par video play karo",
+            intent = ParsedIntent(type = IntentType.SEARCH_AND_PLAY, app = "youtube", query = "video"),
+            targetApp = "youtube",
+            query = "video",
+            plannedActions = listOf("OPEN_YOUTUBE")
+        )
+        context.updateRequestState(
+            requestId = 101L,
+            state = RequestState.PARTIAL_SUCCESS,
+            result = RequestResult(
+                requestId = 101L,
+                state = RequestState.PARTIAL_SUCCESS,
+                summary = "मैंने YouTube पर 'video' खोजने की कोशिश की, लेकिन वीडियो play होने की पुष्टि नहीं हुई।",
+                isVerified = false
+            ),
+            isSearchOnlyStarted = true
+        )
+
+        val report = context.formatExecutionReportForIndex(1)
+        assertTrue("Report must reference request #1", report.contains("अनुरोध #1"))
+        assertTrue("Report must truthfully report partial search state", report.contains("खोज शुरू की") || report.contains("पुष्टि नहीं हुई"))
+    }
+
+    // Test 15: Failure Reporting ("nahi hua")
+    // Must NOT be treated as a web or video search query!
+    @Test
+    fun test15_UserFailureReporting_NahiHua() {
+        val res = parser.parse("nahi hua")
+        assertTrue("Expected handled", res.handled)
+        assertNotNull(res.intent)
+        assertEquals(IntentType.REPORT_FAILURE, res.intent?.type)
+
+        val resDev = parser.parse("नहीं हुआ")
+        assertTrue("Expected handled", resDev.handled)
+        assertEquals(IntentType.REPORT_FAILURE, resDev.intent?.type)
+    }
+
+    // Test 16: User Correction ("maine search karne ko nahi kaha tha")
+    @Test
+    fun test16_UserCorrection_MaineSearchKarneKoNahiKahaTha() {
+        val res = parser.parse("maine search karne ko nahi kaha tha")
+        assertTrue("Expected handled", res.handled)
+        assertNotNull(res.intent)
+        assertEquals(IntentType.CORRECT_PREVIOUS_RESULT, res.intent?.type)
+    }
+
+    // Test 17: Autonomous Challenge Request (6+ steps)
+    @Test
+    fun test17_ChallengeRequest_AutonomousWorkflow() {
+        val res = parser.parse("tumhari marji se koi random target pura karo jisme kam se kam 6 steps hona chahiye")
+        assertTrue("Expected handled", res.handled)
+        assertNotNull(res.intent)
+        assertEquals(IntentType.CHALLENGE_REQUEST, res.intent?.type)
+    }
 }

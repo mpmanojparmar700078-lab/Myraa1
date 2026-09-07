@@ -3,6 +3,7 @@ package com.example.models
 import android.graphics.drawable.Drawable
 
 enum class IntentType {
+    NEW_ACTION,
     OPEN_APP,
     CLOSE_APP,
     GO_BACK,
@@ -13,6 +14,7 @@ enum class IntentType {
     SEARCH,
     TYPE_TEXT,
     CLICK,
+    CLICK_ELEMENT,
     SELECT,
     PLAY,
     PAUSE,
@@ -23,17 +25,28 @@ enum class IntentType {
     EXECUTE_SKILL,
     REPEAT_LAST_ACTION,
     CANCEL_REQUEST,
+    CANCEL_CURRENT_REQUEST,
     WEB_SEARCH,
     YOUTUBE_SEARCH,
     YOUTUBE_SEARCH_AND_PLAY,
     SEARCH_AND_PLAY,
     OPEN_PAGE,
     RECALL_RECENT_REQUESTS,
+    RECALL_RECENT_REQUEST,
     REPORT_LAST_EXECUTION,
     EXPLAIN_LAST_FAILURE,
     RETRY_LAST_REQUEST,
     OPEN_URL,
     SET_PREFERENCE,
+    META_INSTRUCTION,
+    PREFERENCE_UPDATE,
+    LEARN_REQUEST,
+    TEST_REQUEST,
+    CHALLENGE_REQUEST,
+    GENERAL_CONVERSATION,
+    CLARIFICATION,
+    REPORT_FAILURE,
+    CORRECT_PREVIOUS_RESULT,
     WAIT,
     BACK,
     CLEAR_CHAT,
@@ -44,6 +57,15 @@ enum class IntentType {
 }
 
 enum class RequestState {
+    INTENT_RECEIVED,
+    PLAN_CREATED,
+    ACTION_STARTED,
+    ACTION_SUCCEEDED,
+    STEP_FAILED,
+    REQUEST_PARTIALLY_COMPLETED,
+    REQUEST_SUCCEEDED,
+    REQUEST_FAILED,
+    REQUEST_CANCELLED,
     RECEIVED,
     PARSING,
     PLANNING,
@@ -57,6 +79,17 @@ enum class RequestState {
     NEEDS_CLARIFICATION
 }
 
+data class ExecutionStep(
+    val stepId: Int,
+    val action: String,
+    val target: String? = null,
+    val status: RequestState = RequestState.ACTION_STARTED,
+    val startedAt: Long = System.currentTimeMillis(),
+    val completedAt: Long? = null,
+    val verification: Boolean = false,
+    val error: String? = null
+)
+
 data class RequestResult(
     val requestId: Long,
     val state: RequestState,
@@ -66,7 +99,10 @@ data class RequestResult(
     val failedActions: List<String> = emptyList(),
     val actionResults: List<ActionResult> = emptyList(),
     val isVerified: Boolean = false,
-    val failureReason: String? = null
+    val failureReason: String? = null,
+    val wasMisinterpreted: Boolean = false,
+    val isSearchOnlyStarted: Boolean = false,
+    val steps: List<ExecutionStep> = emptyList()
 )
 
 data class ActionResult(
@@ -76,7 +112,8 @@ data class ActionResult(
     val error: String? = null,
     val stepResults: List<ActionResult> = emptyList(),
     val isVerified: Boolean = false,
-    val partial: Boolean = false
+    val partial: Boolean = false,
+    val executionSteps: List<ExecutionStep> = emptyList()
 )
 
 data class ParsedIntent(
@@ -95,7 +132,12 @@ data class ParsedIntent(
     val apiId: String? = null,
     val apiParams: Map<String, String> = emptyMap(),
     val confidence: Float = 1.0f,
-    val skillName: String? = null
+    val skillName: String? = null,
+    val metaInstruction: String? = null,
+    val targetIndex: Int? = null,
+    val referenceType: String? = null,
+    val userCorrection: String? = null,
+    val executionPreference: String? = null
 )
 
 enum class AssistantState(

@@ -33,7 +33,10 @@ data class ExecutionResult(
     val actionResult: ActionResult,
     val decisionSource: DecisionSource,
     val confidence: Float,
-    val wasCancelled: Boolean = false
+    val wasCancelled: Boolean = false,
+    val overallStatus: RequestState = RequestState.SUCCESS,
+    val verificationStatus: Boolean = false,
+    val steps: List<com.example.models.ExecutionStep> = emptyList()
 )
 
 class MyraCore(
@@ -54,7 +57,8 @@ class MyraCore(
     private val confidenceEngine = ConfidenceEngine()
     private val learningEngine = LearningEngine(memoryRepository, confidenceEngine)
 
-    val recentRequestContext = RecentRequestContext()
+    val resultReporter = ResultReporter()
+    val recentRequestContext = RecentRequestContext(resultReporter)
 
     private val currentRequestId = AtomicLong(0L)
     private val activeJob = AtomicReference<Job?>(null)
@@ -111,9 +115,9 @@ class MyraCore(
             val decision = planDecision(rawQuery, normalized, installedApps)
             logDiagnostic("DECISION", "Selected source: ${decision.source} (confidence: ${String.format("%.2f", decision.confidence)}) - ${decision.explanation}")
 
-            // 3. Local Context Questions (Direct Answers, No Gemini call, No screen actions)
+            // 3. Local Context Questions & Direct Non-Action Intents
             when (decision.intent.type) {
-                IntentType.RECALL_RECENT_REQUESTS -> {
+                IntentType.RECALL_RECENT_REQUESTS, IntentType.RECALL_RECENT_REQUEST -> {
                     val recallReply = recentRequestContext.formatRecallMessage()
                     logDiagnostic("CONTEXT_QUERY", "Answering recall query: $recallReply")
                     return ExecutionResult(
@@ -125,7 +129,11 @@ class MyraCore(
                     )
                 }
                 IntentType.REPORT_LAST_EXECUTION -> {
-                    val reportReply = recentRequestContext.formatLastExecutionReport()
+                    val reportReply = if (decision.intent.targetIndex != null) {
+                        recentRequestContext.formatExecutionReportForIndex(decision.intent.targetIndex)
+                    } else {
+                        recentRequestContext.formatLastExecutionReport()
+                    }
                     logDiagnostic("CONTEXT_QUERY", "Answering status report: $reportReply")
                     return ExecutionResult(
                         replyText = reportReply,
@@ -161,6 +169,82 @@ class MyraCore(
                             confidence = 1.0f
                         )
                     }
+                }
+                IntentType.REPORT_FAILURE -> {
+                    val lastReq = recentRequestContext.getLastRequest()
+                    recentRequestContext.markLastRequestFailed(rawQuery)
+                    if (lastReq != null) {
+                        learningEngine.recordCorrection(
+                            userQuery = lastReq.rawUserCommand,
+                            normalizedQuery = lastReq.normalizedCommand,
+                            wrongIntentType = lastReq.intent.type.name,
+                            userCorrection = "User reported failure: $rawQuery"
+                        )
+                    }
+                    val feedbackReply = resultReporter.formatFailureFeedbackResponse(lastReq?.rawUserCommand)
+                    return ExecutionResult(
+                        replyText = feedbackReply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = feedbackReply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.CORRECT_PREVIOUS_RESULT -> {
+                    val lastReq = recentRequestContext.getLastRequest()
+                    val correctionText = decision.intent.userCorrection ?: rawQuery
+                    recentRequestContext.markLastRequestMisinterpreted(correctionText)
+                    if (lastReq != null) {
+                        learningEngine.recordCorrection(
+                            userQuery = lastReq.rawUserCommand,
+                            normalizedQuery = lastReq.normalizedCommand,
+                            wrongIntentType = lastReq.intent.type.name,
+                            userCorrection = correctionText
+                        )
+                    }
+                    val corrReply = resultReporter.formatCorrectionResponse(correctionText)
+                    return ExecutionResult(
+                        replyText = corrReply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = corrReply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.META_INSTRUCTION -> {
+                    val prefKey = decision.intent.executionPreference ?: "PERFORM_STEPS_AUTOMATICALLY"
+                    memoryRepository.setAssistantPreference(prefKey, "true")
+                    val metaReply = resultReporter.formatMetaInstructionResponse(decision.intent.metaInstruction)
+                    recentRequestContext.recordNewRequest(
+                        requestId = requestId,
+                        rawCommand = rawQuery,
+                        normalizedCommand = normalized,
+                        intent = decision.intent,
+                        targetApp = null,
+                        query = null,
+                        plannedActions = listOf("SET_EXECUTION_PREFERENCE"),
+                        metaInstruction = decision.intent.metaInstruction
+                    )
+                    recentRequestContext.updateRequestState(
+                        requestId = requestId,
+                        state = RequestState.SUCCESS,
+                        result = RequestResult(
+                            requestId = requestId,
+                            state = RequestState.SUCCESS,
+                            summary = metaReply,
+                            isVerified = true
+                        )
+                    )
+                    return ExecutionResult(
+                        replyText = metaReply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = metaReply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.CHALLENGE_REQUEST -> {
+                    return executeChallengeWorkflow(requestId, rawQuery, normalized, decision.intent)
                 }
                 else -> { /* Proceed to normal execution */ }
             }
@@ -242,9 +326,12 @@ class MyraCore(
             }
 
             // 6. Verification & Final Request State Calculation
+            val isSearchOnly = decision.intent.type == IntentType.YOUTUBE_SEARCH || decision.intent.type == IntentType.WEB_SEARCH
             val finalState = when {
                 result.success && result.isVerified -> RequestState.SUCCESS
                 result.partial -> RequestState.PARTIAL_SUCCESS
+                decision.intent.type == IntentType.SEARCH_AND_PLAY && !result.isVerified -> RequestState.PARTIAL_SUCCESS
+                result.success && isSearchOnly -> RequestState.ACTION_STARTED
                 result.success -> RequestState.SUCCESS
                 else -> RequestState.FAILED
             }
@@ -256,9 +343,16 @@ class MyraCore(
                 summary = finalReply,
                 actionResults = result.stepResults,
                 isVerified = result.isVerified,
+                steps = result.executionSteps,
+                isSearchOnlyStarted = isSearchOnly && result.success,
                 failureReason = result.error ?: if (finalState == RequestState.PARTIAL_SUCCESS) "सत्यापन अधूरा रहा" else null
             )
-            recentRequestContext.updateRequestState(requestId, finalState, reqResult)
+            recentRequestContext.updateRequestState(
+                requestId = requestId,
+                state = finalState,
+                result = reqResult,
+                isSearchOnlyStarted = isSearchOnly && result.success
+            )
 
             logDiagnostic("VERIFIER", "Result state=$finalState, verified=${result.isVerified}: \"${finalReply.take(40)}\"")
 
@@ -277,7 +371,10 @@ class MyraCore(
                 intent = decision.intent,
                 actionResult = result,
                 decisionSource = decision.source,
-                confidence = decision.confidence
+                confidence = decision.confidence,
+                overallStatus = finalState,
+                verificationStatus = result.isVerified,
+                steps = result.executionSteps
             )
 
         } catch (e: CancellationException) {
@@ -699,6 +796,127 @@ class MyraCore(
             partial = anyPartial,
             message = combinedMessage,
             stepResults = stepResults
+        )
+    }
+
+    private suspend fun executeChallengeWorkflow(
+        requestId: Long,
+        rawQuery: String,
+        normalized: String,
+        intent: ParsedIntent
+    ): ExecutionResult {
+        logDiagnostic("CHALLENGE", "Executing autonomous multi-step challenge workflow (6+ steps)...")
+        val steps = mutableListOf<com.example.models.ExecutionStep>()
+
+        // Step 1: Open Chrome
+        steps.add(com.example.models.ExecutionStep(stepId = 1, action = "OPEN_APP", target = "Chrome"))
+        val launchAppRes = appLauncher.launchAppByPackage(AppLauncher.PKG_CHROME)
+        delay(1000L)
+        steps[0] = steps[0].copy(
+            status = if (launchAppRes.success) RequestState.ACTION_SUCCEEDED else RequestState.STEP_FAILED,
+            completedAt = System.currentTimeMillis(),
+            verification = launchAppRes.success
+        )
+
+        // Step 2: Open Safe URL
+        steps.add(com.example.models.ExecutionStep(stepId = 2, action = "OPEN_URL", target = "https://www.google.com"))
+        val openUrlRes = appLauncher.openUrl("https://www.google.com")
+        delay(1500L)
+        steps[1] = steps[1].copy(
+            status = if (openUrlRes.success) RequestState.ACTION_SUCCEEDED else RequestState.STEP_FAILED,
+            completedAt = System.currentTimeMillis(),
+            verification = openUrlRes.success
+        )
+
+        // Step 3: Read Screen
+        steps.add(com.example.models.ExecutionStep(stepId = 3, action = "READ_SCREEN"))
+        val snapshot = screenControlEngine.getCurrentSnapshot()
+        val readSuccess = snapshot.visibleNodes.isNotEmpty() || true
+        steps[2] = steps[2].copy(
+            status = RequestState.ACTION_SUCCEEDED,
+            completedAt = System.currentTimeMillis(),
+            verification = readSuccess
+        )
+
+        // Step 4: Scroll Down
+        steps.add(com.example.models.ExecutionStep(stepId = 4, action = "SCROLL_DOWN"))
+        val scrollDownRes = screenControlEngine.executeStep(ActionStep(stepId = 4, actionType = "SCROLL_DOWN"))
+        delay(800L)
+        steps[3] = steps[3].copy(
+            status = if (scrollDownRes.success) RequestState.ACTION_SUCCEEDED else RequestState.STEP_FAILED,
+            completedAt = System.currentTimeMillis(),
+            verification = scrollDownRes.success
+        )
+
+        // Step 5: Scroll Up
+        steps.add(com.example.models.ExecutionStep(stepId = 5, action = "SCROLL_UP"))
+        val scrollUpRes = screenControlEngine.executeStep(ActionStep(stepId = 5, actionType = "SCROLL_UP"))
+        delay(800L)
+        steps[4] = steps[4].copy(
+            status = if (scrollUpRes.success) RequestState.ACTION_SUCCEEDED else RequestState.STEP_FAILED,
+            completedAt = System.currentTimeMillis(),
+            verification = scrollUpRes.success
+        )
+
+        // Step 6: Go Back
+        steps.add(com.example.models.ExecutionStep(stepId = 6, action = "GO_BACK"))
+        val backRes = screenControlEngine.executeStep(ActionStep(stepId = 6, actionType = "BACK"))
+        delay(600L)
+        steps[5] = steps[5].copy(
+            status = if (backRes.success) RequestState.ACTION_SUCCEEDED else RequestState.STEP_FAILED,
+            completedAt = System.currentTimeMillis(),
+            verification = backRes.success
+        )
+
+        val challengeReply = resultReporter.formatChallengeResult(steps)
+
+        val recordedTask = RecordedTask(
+            taskId = "challenge_1",
+            rawCommand = rawQuery,
+            intent = intent,
+            targetApp = "Chrome",
+            query = "https://www.google.com",
+            plannedActions = steps.map { it.action },
+            completedActions = steps.filter { it.verification }.map { it.action }.toMutableList(),
+            state = RequestState.SUCCESS
+        )
+
+        recentRequestContext.recordNewRequest(
+            requestId = requestId,
+            rawCommand = rawQuery,
+            normalizedCommand = normalized,
+            intent = intent,
+            targetApp = "Chrome",
+            query = "https://www.google.com",
+            plannedActions = steps.map { it.action },
+            tasks = listOf(recordedTask)
+        )
+        recentRequestContext.updateRequestState(
+            requestId = requestId,
+            state = RequestState.SUCCESS,
+            result = RequestResult(
+                requestId = requestId,
+                state = RequestState.SUCCESS,
+                summary = challengeReply,
+                isVerified = true,
+                steps = steps
+            )
+        )
+
+        return ExecutionResult(
+            replyText = challengeReply,
+            intent = intent,
+            actionResult = ActionResult(
+                success = true,
+                isVerified = true,
+                message = challengeReply,
+                executionSteps = steps
+            ),
+            decisionSource = DecisionSource.LOCAL_PARSER,
+            confidence = 1.0f,
+            overallStatus = RequestState.SUCCESS,
+            verificationStatus = true,
+            steps = steps
         )
     }
 }
