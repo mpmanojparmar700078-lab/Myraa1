@@ -6,12 +6,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessibilityNew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
@@ -36,10 +43,18 @@ fun SettingsDialog(
     currentLanguage: SpeechLanguage,
     isVoiceOutputEnabled: Boolean,
     isForegroundServiceActive: Boolean,
+    isAutoLearningEnabled: Boolean,
+    isGeminiFallbackEnabled: Boolean,
+    skillCount: Int,
+    experienceCount: Int,
     onSaveApiKey: (String) -> Unit,
     onSelectLanguage: (SpeechLanguage) -> Unit,
     onToggleVoiceOutput: (Boolean) -> Unit,
     onToggleForegroundService: (Boolean) -> Unit,
+    onToggleAutoLearning: (Boolean) -> Unit,
+    onToggleGeminiFallback: (Boolean) -> Unit,
+    onOpenBrainDialog: () -> Unit,
+    onOpenPermissionsDialog: () -> Unit,
     onSaveTtsSettings: (rate: Float, pitch: Float) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -47,6 +62,8 @@ fun SettingsDialog(
     var selectedLanguage by remember { mutableStateOf(currentLanguage) }
     var voiceOutput by remember { mutableStateOf(isVoiceOutputEnabled) }
     var serviceActive by remember { mutableStateOf(isForegroundServiceActive) }
+    var autoLearning by remember { mutableStateOf(isAutoLearningEnabled) }
+    var geminiFallback by remember { mutableStateOf(isGeminiFallbackEnabled) }
     var speechRate by remember { mutableFloatStateOf(1.0f) }
     var pitch by remember { mutableFloatStateOf(1.0f) }
 
@@ -59,8 +76,97 @@ fun SettingsDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
             ) {
+                // --- PERMISSIONS & SYSTEM ACCESS ---
                 Text(
-                    text = "Gemini API Key (Optional)",
+                    text = "सिस्टम अनुमतियाँ और सेवाएं (Permissions)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onOpenPermissionsDialog()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(imageVector = Icons.Default.AccessibilityNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Accessibility & Mic अनुमति जांचें")
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // --- BRAIN / SELF-LEARNING SECTION ---
+                Text(
+                    text = "Local-First Self-Learning Brain",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Automatic Learning", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Learn repeated workflows & patterns locally",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = autoLearning,
+                        onCheckedChange = {
+                            autoLearning = it
+                            onToggleAutoLearning(it)
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Gemini Fallback", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Only call Gemini when local brain cannot solve",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = geminiFallback,
+                        onCheckedChange = {
+                            geminiFallback = it
+                            onToggleGeminiFallback(it)
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = onOpenBrainDialog,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Inspect Brain ($skillCount Skills, $experienceCount Memories)")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // --- GEMINI API KEY SECTION ---
+                Text(
+                    text = "Gemini API Key (Optional Fallback)",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -77,7 +183,10 @@ fun SettingsDialog(
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
 
+                // --- LANGUAGE SECTION ---
                 Text(
                     text = "Assistant Language",
                     style = MaterialTheme.typography.labelMedium,
@@ -107,6 +216,7 @@ fun SettingsDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // --- VOICE OUTPUT SECTION ---
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
@@ -130,6 +240,7 @@ fun SettingsDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // --- BACKGROUND SERVICE SECTION ---
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()

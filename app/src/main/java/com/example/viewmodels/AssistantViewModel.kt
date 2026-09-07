@@ -3,14 +3,16 @@ package com.example.viewmodels
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.brain.MyraCore
+import com.example.data.ExperienceEntity
+import com.example.data.LearnedSkillEntity
 import com.example.data.MemoryRepository
 import com.example.data.MessageEntity
 import com.example.data.MyraDatabase
-import com.example.models.ActionResult
 import com.example.models.AssistantState
+import com.example.models.DiagnosticLog
 import com.example.models.InstalledAppInfo
 import com.example.models.IntentType
-import com.example.models.ParsedIntent
 import com.example.platform.android.AppLauncher
 import com.example.services.GeminiService
 import com.example.services.LocalCommandParser
@@ -20,6 +22,7 @@ import com.example.voice.SpeechState
 import com.example.voice.SpeechToTextManager
 import com.example.voice.TextToSpeechManager
 import com.example.voice.TtsState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +37,10 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         messageDao = db.messageDao(),
         preferenceDao = db.preferenceDao(),
         interactionHistoryDao = db.interactionHistoryDao(),
+        experienceDao = db.experienceDao(),
+        learnedSkillDao = db.learnedSkillDao(),
+        failedStrategyDao = db.failedStrategyDao(),
+        learnedFactDao = db.learnedFactDao(),
         context = application
     )
 
@@ -41,11 +48,33 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     private val localCommandParser = LocalCommandParser()
     private val geminiService = GeminiService { memoryRepository.getCustomApiKey() }
 
+    val myraCore = MyraCore(
+        context = application,
+        memoryRepository = memoryRepository,
+        appLauncher = appLauncher,
+        localCommandParser = localCommandParser,
+        geminiService = geminiService
+    )
+
     private val ttsManager = TextToSpeechManager(application)
     private var sttManager: SpeechToTextManager? = null
 
     val messages: StateFlow<List<MessageEntity>> = memoryRepository.messages
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val learnedSkills: StateFlow<List<LearnedSkillEntity>> = memoryRepository.learnedSkills
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val experiences: StateFlow<List<ExperienceEntity>> = memoryRepository.experiences
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val skillCount: StateFlow<Int> = memoryRepository.skillCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val experienceCount: StateFlow<Int> = memoryRepository.experienceCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val diagnosticLogs: StateFlow<List<DiagnosticLog>> = myraCore.diagnosticLogs
 
     private val _assistantState = MutableStateFlow(AssistantState.IDLE)
     val assistantState: StateFlow<AssistantState> = _assistantState.asStateFlow()
@@ -70,8 +99,16 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     private val _isForegroundServiceActive = MutableStateFlow(memoryRepository.isForegroundServiceEnabled())
     val isForegroundServiceActive: StateFlow<Boolean> = _isForegroundServiceActive.asStateFlow()
 
+    private val _isAutoLearningEnabled = MutableStateFlow(memoryRepository.isAutoLearningEnabled())
+    val isAutoLearningEnabled: StateFlow<Boolean> = _isAutoLearningEnabled.asStateFlow()
+
+    private val _isGeminiFallbackEnabled = MutableStateFlow(memoryRepository.isGeminiFallbackEnabled())
+    val isGeminiFallbackEnabled: StateFlow<Boolean> = _isGeminiFallbackEnabled.asStateFlow()
+
     private val _installedApps = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
     val installedApps: StateFlow<List<InstalledAppInfo>> = _installedApps.asStateFlow()
+
+    val sttErrorMessage: StateFlow<String?> = sttManager?.errorMessage ?: MutableStateFlow(null)
 
     init {
         sttManager = SpeechToTextManager(application) { transcript, isFinal ->
@@ -103,112 +140,65 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun processUserQuery(query: String) {
+    fun cancelCurrentTask() {
+        _assistantState.value = AssistantState.CANCELLING
+        myraCore.cancelActiveRequest()
+        stopSpeaking()
+        stopListening()
+        _assistantState.value = AssistantState.CANCELLED
         viewModelScope.launch {
-            _assistantState.value = AssistantState.PROCESSING
-            memoryRepository.saveUserMessage(query)
-
-            // Step 1: Check local intent parser
-            val localResult = localCommandParser.parse(query)
-            if (localResult.handled && localResult.intent != null) {
-                executeIntent(localResult.intent, query)
-                return@launch
-            }
-
-            // Step 2: Fallback to Gemini AI / intelligent local responses
-            val recentContext = messages.value.takeLast(4).joinToString("\n") {
-                "${if (it.isUser) "User" else "Myra"}: ${it.text}"
-            }
-            val aiResponse = geminiService.generateResponse(query, recentContext)
-
+            kotlinx.coroutines.delay(1000)
             _assistantState.value = AssistantState.IDLE
-            memoryRepository.saveAssistantResponse(
-                text = aiResponse,
-                intent = ParsedIntent(type = IntentType.GENERAL_CHAT, responseText = aiResponse)
-            )
-
-            if (_isVoiceOutputEnabled.value) {
-                speak(aiResponse)
-            }
         }
     }
 
-    private fun executeIntent(intent: ParsedIntent, rawQuery: String) {
-        viewModelScope.launch {
-            _assistantState.value = AssistantState.EXECUTING_ACTION
-            var actionResult: ActionResult? = null
-            var reply = intent.responseText ?: "एक्शन पूरा किया गया।"
+    private fun processUserQuery(query: String) {
+        val job = viewModelScope.launch {
+            _assistantState.value = AssistantState.PROCESSING
+            memoryRepository.saveUserMessage(query)
 
-            when (intent.type) {
-                IntentType.OPEN_APP -> {
-                    val targetApp = intent.app?.lowercase() ?: ""
-                    actionResult = when {
-                        intent.target != null -> appLauncher.launchAppByPackage(intent.target)
-                        targetApp.contains("camera") -> appLauncher.launchCamera()
-                        targetApp.contains("dialer") || targetApp.contains("phone") -> appLauncher.launchDialer()
-                        targetApp.contains("youtube") -> appLauncher.launchAppByPackage(AppLauncher.PKG_YOUTUBE)
-                        targetApp.contains("chrome") -> appLauncher.launchAppByPackage(AppLauncher.PKG_CHROME)
-                        targetApp.contains("map") -> appLauncher.launchAppByPackage(AppLauncher.PKG_MAPS)
-                        else -> {
-                            // Find in installed apps
-                            val match = _installedApps.value.firstOrNull {
-                                it.appName.lowercase().contains(targetApp)
-                            }
-                            if (match != null) {
-                                appLauncher.launchAppByPackage(match.packageName)
-                            } else {
-                                appLauncher.performWebSearch(rawQuery)
-                            }
-                        }
-                    }
-                    reply = actionResult.message
+            try {
+                val recentContext = messages.value.takeLast(4).joinToString("\n") {
+                    "${if (it.isUser) "User" else "Myra"}: ${it.text}"
                 }
 
-                IntentType.OPEN_SETTINGS -> {
-                    actionResult = appLauncher.launchSettings()
-                    reply = actionResult.message
-                }
+                _assistantState.value = AssistantState.EXECUTING_ACTION
+                val result = myraCore.executeUserQuery(
+                    rawQuery = query,
+                    installedApps = _installedApps.value,
+                    recentConversationContext = recentContext
+                )
 
-                IntentType.WEB_SEARCH -> {
-                    val q = intent.query ?: rawQuery
-                    actionResult = appLauncher.performWebSearch(q)
-                    reply = actionResult.message
-                }
-
-                IntentType.YOUTUBE_SEARCH, IntentType.YOUTUBE_SEARCH_AND_PLAY -> {
-                    val q = intent.query ?: rawQuery
-                    actionResult = appLauncher.searchYouTube(q)
-                    reply = actionResult.message
-                }
-
-                IntentType.OPEN_URL -> {
-                    val url = intent.target ?: rawQuery
-                    actionResult = appLauncher.openUrl(url)
-                    reply = actionResult.message
-                }
-
-                IntentType.CLEAR_CHAT -> {
+                if (result.intent.type == IntentType.CLEAR_CHAT) {
                     clearChatHistory()
                     _assistantState.value = AssistantState.IDLE
                     return@launch
                 }
 
-                else -> {
-                    actionResult = ActionResult(success = true, message = reply)
+                _assistantState.value = AssistantState.IDLE
+                memoryRepository.saveAssistantResponse(
+                    text = result.replyText,
+                    intent = result.intent,
+                    result = result.actionResult,
+                    executionSource = result.decisionSource.name,
+                    confidence = result.confidence
+                )
+
+                if (_isVoiceOutputEnabled.value) {
+                    speak(result.replyText)
                 }
-            }
 
-            memoryRepository.saveAssistantResponse(
-                text = reply,
-                intent = intent,
-                result = actionResult
-            )
-
-            _assistantState.value = AssistantState.IDLE
-            if (_isVoiceOutputEnabled.value) {
-                speak(reply)
+            } catch (e: CancellationException) {
+                _assistantState.value = AssistantState.CANCELLED
+            } catch (e: Exception) {
+                _assistantState.value = AssistantState.ERROR
+                memoryRepository.saveAssistantResponse(
+                    text = "त्रुटि: ${e.localizedMessage}",
+                    executionSource = "ERROR"
+                )
             }
         }
+        myraCore.setActiveJob(job)
     }
 
     fun startListening() {
@@ -218,6 +208,23 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun stopListening() {
         sttManager?.stopListening()
+    }
+
+    fun onSpeechResult(transcript: String) {
+        val trimmed = transcript.trim()
+        if (trimmed.isNotBlank()) {
+            _inputText.value = trimmed
+            processUserQuery(trimmed)
+        }
+    }
+
+    fun getSpeechIntent(): android.content.Intent {
+        return sttManager?.createSpeechRecognizerIntent(_speechLanguage.value)
+            ?: android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+    }
+
+    fun clearSttError() {
+        sttManager?.clearError()
     }
 
     fun speak(text: String) {
@@ -279,6 +286,35 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun setAutoLearningEnabled(enabled: Boolean) {
+        _isAutoLearningEnabled.value = enabled
+        memoryRepository.setAutoLearningEnabled(enabled)
+    }
+
+    fun setGeminiFallbackEnabled(enabled: Boolean) {
+        _isGeminiFallbackEnabled.value = enabled
+        memoryRepository.setGeminiFallbackEnabled(enabled)
+    }
+
+    fun deleteSkill(id: Long) {
+        viewModelScope.launch {
+            memoryRepository.deleteSkill(id)
+        }
+    }
+
+    fun deleteExperience(id: Long) {
+        viewModelScope.launch {
+            memoryRepository.deleteExperience(id)
+        }
+    }
+
+    fun resetLearnedBrain() {
+        viewModelScope.launch {
+            memoryRepository.resetAllLearnedKnowledge()
+            myraCore.logDiagnostic("MYRA_CORE", "All learned knowledge, skills, and experiences reset by user.")
+        }
+    }
+
     fun setTtsSpeechRate(rate: Float) {
         memoryRepository.setTtsSpeechRate(rate)
     }
@@ -299,5 +335,6 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         super.onCleared()
         ttsManager.release()
         sttManager?.stopListening()
+        myraCore.cancelActiveRequest()
     }
 }

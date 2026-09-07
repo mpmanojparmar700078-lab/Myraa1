@@ -4,7 +4,25 @@ import android.graphics.drawable.Drawable
 
 enum class IntentType {
     OPEN_APP,
+    CLOSE_APP,
+    GO_BACK,
+    GO_HOME,
+    SCROLL,
+    SCROLL_UP,
+    SCROLL_DOWN,
+    SEARCH,
+    TYPE_TEXT,
+    CLICK,
+    SELECT,
+    PLAY,
+    PAUSE,
+    STOP,
     OPEN_SETTINGS,
+    READ_SCREEN,
+    FIND_ELEMENT,
+    EXECUTE_SKILL,
+    REPEAT_LAST_ACTION,
+    CANCEL_REQUEST,
     WEB_SEARCH,
     YOUTUBE_SEARCH,
     YOUTUBE_SEARCH_AND_PLAY,
@@ -39,7 +57,8 @@ data class ParsedIntent(
     val responseText: String? = null,
     val apiId: String? = null,
     val apiParams: Map<String, String> = emptyMap(),
-    val confidence: Float = 1.0f
+    val confidence: Float = 1.0f,
+    val skillName: String? = null
 )
 
 enum class AssistantState(
@@ -50,6 +69,7 @@ enum class AssistantState(
     IDLE("Idle", "तैयार (Ready)", "Ready for commands"),
     PROCESSING("Processing", "सोच रही हूँ…", "Analyzing intent with AI…"),
     EXECUTING_ACTION("Executing Action", "एक्शन चला रही हूँ…", "Executing Android action…"),
+    LEARNING("Learning", "नया पैटर्न सीख रही हूँ…", "Learning from experience…"),
     BACKGROUND_READY("Background Active", "बैकग्राउंड में सक्रिय", "Active in background"),
     CANCELLING("Cancelling", "रद्द हो रहा है…", "Cancelling active task…"),
     CANCELLED("Cancelled", "रद्द किया गया", "Request cancelled"),
@@ -70,4 +90,82 @@ data class InstalledAppInfo(
     val packageName: String,
     val isSystemApp: Boolean = false,
     val icon: Drawable? = null
+)
+
+// --- SELF-LEARNING BRAIN & ACTION CHAIN MODELS ---
+
+enum class DecisionSource {
+    LOCAL_PARSER,
+    LEARNED_SKILL,
+    EXPERIENCE_MEMORY,
+    SCREEN_CONTEXT,
+    GEMINI_FALLBACK
+}
+
+data class ExecutionDecision(
+    val source: DecisionSource,
+    val intent: ParsedIntent,
+    val confidence: Float,
+    val explanation: String,
+    val matchedSkillId: Long? = null,
+    val matchedExperienceId: Long? = null
+)
+
+data class ActionStep(
+    val stepId: Int,
+    val actionType: String,
+    val target: String? = null,
+    val value: String? = null,
+    val waitMs: Long = 500L,
+    val optional: Boolean = false
+)
+
+data class ActionChain(
+    val chainId: String,
+    val requestId: Long,
+    val steps: List<ActionStep>,
+    val description: String
+)
+
+data class ActionStepResult(
+    val stepId: Int,
+    val actionType: String,
+    val success: Boolean,
+    val durationMs: Long = 0L,
+    val error: String? = null,
+    val verifiedState: String? = null
+)
+
+data class ActionChainResult(
+    val chainId: String,
+    val requestId: Long,
+    val success: Boolean,
+    val stepResults: List<ActionStepResult>,
+    val totalDurationMs: Long,
+    val failureReason: String? = null
+)
+
+data class ScreenNodeInfo(
+    val text: String? = null,
+    val contentDescription: String? = null,
+    val resourceId: String? = null,
+    val className: String? = null,
+    val isClickable: Boolean = false,
+    val isEditable: Boolean = false,
+    val isScrollable: Boolean = false,
+    val isVisibleToUser: Boolean = true,
+    val boundsRect: String? = null
+)
+
+data class ScreenSnapshot(
+    val packageName: String? = null,
+    val activityName: String? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+    val visibleNodes: List<ScreenNodeInfo> = emptyList()
+)
+
+data class DiagnosticLog(
+    val timestamp: Long = System.currentTimeMillis(),
+    val tag: String,
+    val message: String
 )

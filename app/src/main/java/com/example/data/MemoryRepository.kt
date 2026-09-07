@@ -2,6 +2,7 @@ package com.example.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.brain.PrivacyFilter
 import com.example.models.ActionResult
 import com.example.models.ParsedIntent
 import kotlinx.coroutines.flow.Flow
@@ -10,6 +11,10 @@ class MemoryRepository(
     private val messageDao: MessageDao,
     private val preferenceDao: PreferenceDao,
     private val interactionHistoryDao: InteractionHistoryDao,
+    private val experienceDao: ExperienceDao,
+    private val learnedSkillDao: LearnedSkillDao,
+    private val failedStrategyDao: FailedStrategyDao,
+    private val learnedFactDao: LearnedFactDao,
     context: Context
 ) {
     private val prefs: SharedPreferences = context.getSharedPreferences("myra_settings", Context.MODE_PRIVATE)
@@ -17,6 +22,14 @@ class MemoryRepository(
     val messages: Flow<List<MessageEntity>> = messageDao.getAllMessages()
     val allPreferences: Flow<List<UserPreferenceEntity>> = preferenceDao.getAllPreferences()
     val interactionHistory: Flow<List<InteractionHistoryEntity>> = interactionHistoryDao.getAllHistory()
+
+    val experiences: Flow<List<ExperienceEntity>> = experienceDao.getAllExperiences()
+    val learnedSkills: Flow<List<LearnedSkillEntity>> = learnedSkillDao.getAllSkills()
+    val failedStrategies: Flow<List<FailedStrategyEntity>> = failedStrategyDao.getAllFailedStrategies()
+    val learnedFacts: Flow<List<LearnedFactEntity>> = learnedFactDao.getAllFacts()
+
+    val experienceCount: Flow<Int> = experienceDao.countExperiences()
+    val skillCount: Flow<Int> = learnedSkillDao.countSkills()
 
     companion object {
         const val KEY_LANGUAGE = "preferred_language"
@@ -27,11 +40,14 @@ class MemoryRepository(
         const val PREF_VOICE_OUTPUT_ENABLED = "voice_output_enabled"
         const val PREF_TTS_SPEECH_RATE = "tts_speech_rate"
         const val PREF_TTS_PITCH = "tts_pitch"
+        const val PREF_AUTO_LEARNING_ENABLED = "auto_learning_enabled"
+        const val PREF_GEMINI_FALLBACK_ENABLED = "gemini_fallback_enabled"
     }
 
     suspend fun saveUserMessage(text: String, language: String? = null): Long {
+        val safeText = if (PrivacyFilter.isSensitive(text)) PrivacyFilter.redactSensitive(text) else text
         val entity = MessageEntity(
-            text = text,
+            text = safeText,
             isUser = true,
             language = language
         )
@@ -42,7 +58,9 @@ class MemoryRepository(
         text: String,
         intent: ParsedIntent? = null,
         result: ActionResult? = null,
-        language: String? = null
+        language: String? = null,
+        executionSource: String = "LOCAL",
+        confidence: Float? = null
     ): Long {
         val entity = MessageEntity(
             text = text,
@@ -50,7 +68,9 @@ class MemoryRepository(
             actionType = intent?.type?.name,
             actionTarget = intent?.target ?: intent?.app ?: result?.launchedTarget,
             actionSuccess = result?.success,
-            language = language
+            language = language,
+            executionSource = executionSource,
+            confidence = confidence
         )
         return messageDao.insertMessage(entity)
     }
@@ -67,6 +87,9 @@ class MemoryRepository(
         language: String? = null,
         latencyMs: Long = 0L
     ): Long {
+        if (PrivacyFilter.isSensitive(userQuery)) {
+            return -1L
+        }
         val entity = InteractionHistoryEntity(
             userQuery = userQuery,
             assistantResponse = assistantResponse,
@@ -81,6 +104,126 @@ class MemoryRepository(
             latencyMs = latencyMs
         )
         return interactionHistoryDao.insertInteraction(entity)
+    }
+
+    // --- EXPERIENCE MEMORY METHODS ---
+
+    suspend fun findExactExperience(normalized: String): ExperienceEntity? {
+        return experienceDao.findExactExperience(normalized)
+    }
+
+    suspend fun searchExperiences(keyword: String, limit: Int = 5): List<ExperienceEntity> {
+        return experienceDao.searchExperiences(keyword, limit)
+    }
+
+    suspend fun getExperiencesByIntent(intent: String, limit: Int = 5): List<ExperienceEntity> {
+        return experienceDao.getExperiencesByIntent(intent, limit)
+    }
+
+    suspend fun saveExperience(experience: ExperienceEntity): Long {
+        if (PrivacyFilter.isSensitive(experience.userCommand)) {
+            return -1L
+        }
+        return experienceDao.insertExperience(experience)
+    }
+
+    suspend fun updateExperience(experience: ExperienceEntity) {
+        experienceDao.updateExperience(experience)
+    }
+
+    suspend fun deleteExperience(id: Long) {
+        experienceDao.deleteExperience(id)
+    }
+
+    suspend fun clearExperiences() {
+        experienceDao.clearAllExperiences()
+    }
+
+    suspend fun pruneBadExperiences(): Int {
+        return experienceDao.pruneBadExperiences()
+    }
+
+    // --- LEARNED SKILLS METHODS ---
+
+    suspend fun getEnabledSkills(): List<LearnedSkillEntity> {
+        return learnedSkillDao.getEnabledSkills()
+    }
+
+    suspend fun getSkillByName(name: String): LearnedSkillEntity? {
+        return learnedSkillDao.getSkillByName(name)
+    }
+
+    suspend fun saveSkill(skill: LearnedSkillEntity): Long {
+        return learnedSkillDao.insertSkill(skill)
+    }
+
+    suspend fun updateSkill(skill: LearnedSkillEntity) {
+        learnedSkillDao.updateSkill(skill)
+    }
+
+    suspend fun deleteSkill(id: Long) {
+        learnedSkillDao.deleteSkill(id)
+    }
+
+    suspend fun clearSkills() {
+        learnedSkillDao.clearAllSkills()
+    }
+
+    // --- FAILED STRATEGY METHODS ---
+
+    suspend fun findFailedStrategy(pattern: String, screenPackage: String?): FailedStrategyEntity? {
+        return failedStrategyDao.findFailure(pattern, screenPackage)
+    }
+
+    suspend fun recordFailedStrategy(failed: FailedStrategyEntity): Long {
+        val existing = failedStrategyDao.findFailure(failed.pattern, failed.screenPackage)
+        return if (existing != null) {
+            val updated = existing.copy(
+                failureCount = existing.failureCount + 1,
+                lastFailedTimestamp = System.currentTimeMillis(),
+                reason = failed.reason ?: existing.reason
+            )
+            failedStrategyDao.updateFailedStrategy(updated)
+            existing.id
+        } else {
+            failedStrategyDao.insertFailedStrategy(failed)
+        }
+    }
+
+    suspend fun clearFailedStrategies() {
+        failedStrategyDao.clearAllFailedStrategies()
+    }
+
+    // --- LEARNED FACTS METHODS ---
+
+    suspend fun getFact(category: String, key: String): LearnedFactEntity? {
+        return learnedFactDao.getFact(category, key)
+    }
+
+    suspend fun saveFact(category: String, key: String, value: String, confidence: Float = 0.9f): Long {
+        if (PrivacyFilter.isSensitive(value) || PrivacyFilter.isSensitive(key)) {
+            return -1L
+        }
+        val fact = LearnedFactEntity(
+            category = category,
+            key = key,
+            value = value,
+            confidence = confidence
+        )
+        return learnedFactDao.insertFact(fact)
+    }
+
+    suspend fun clearFacts() {
+        learnedFactDao.clearAllFacts()
+    }
+
+    // --- COMPLETE RESET OF LEARNED KNOWLEDGE ---
+
+    suspend fun resetAllLearnedKnowledge() {
+        experienceDao.clearAllExperiences()
+        learnedSkillDao.clearAllSkills()
+        failedStrategyDao.clearAllFailedStrategies()
+        learnedFactDao.clearAllFacts()
     }
 
     suspend fun clearHistory() {
@@ -158,5 +301,21 @@ class MemoryRepository(
 
     fun setTtsPitch(pitch: Float) {
         prefs.edit().putFloat(PREF_TTS_PITCH, pitch).apply()
+    }
+
+    fun isAutoLearningEnabled(): Boolean {
+        return prefs.getBoolean(PREF_AUTO_LEARNING_ENABLED, true)
+    }
+
+    fun setAutoLearningEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(PREF_AUTO_LEARNING_ENABLED, enabled).apply()
+    }
+
+    fun isGeminiFallbackEnabled(): Boolean {
+        return prefs.getBoolean(PREF_GEMINI_FALLBACK_ENABLED, true)
+    }
+
+    fun setGeminiFallbackEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(PREF_GEMINI_FALLBACK_ENABLED, enabled).apply()
     }
 }

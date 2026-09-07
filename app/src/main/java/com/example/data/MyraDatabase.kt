@@ -9,15 +9,23 @@ import androidx.room.RoomDatabase
     entities = [
         MessageEntity::class,
         UserPreferenceEntity::class,
-        InteractionHistoryEntity::class
+        InteractionHistoryEntity::class,
+        ExperienceEntity::class,
+        LearnedSkillEntity::class,
+        FailedStrategyEntity::class,
+        LearnedFactEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class MyraDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun preferenceDao(): PreferenceDao
     abstract fun interactionHistoryDao(): InteractionHistoryDao
+    abstract fun experienceDao(): ExperienceDao
+    abstract fun learnedSkillDao(): LearnedSkillDao
+    abstract fun failedStrategyDao(): FailedStrategyDao
+    abstract fun learnedFactDao(): LearnedFactDao
 
     companion object {
         @Volatile
