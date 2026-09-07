@@ -150,4 +150,39 @@ class ScreenControlEngine(
         val service = MyraAccessibilityService.activeService ?: return com.example.models.ScreenSnapshot()
         return treeReader.captureSnapshot(service.rootInActiveWindow)
     }
+
+    suspend fun waitForPackage(targetPackage: String, timeoutMs: Long = 2000L): Boolean {
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            val snapshot = getCurrentSnapshot()
+            if (snapshot.packageName?.contains(targetPackage, ignoreCase = true) == true) {
+                return true
+            }
+            delay(250L)
+        }
+        return false
+    }
+
+    suspend fun waitForCondition(
+        timeoutMs: Long = 2500L,
+        intervalMs: Long = 300L,
+        condition: (com.example.models.ScreenSnapshot) -> Boolean
+    ): Boolean {
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            val snapshot = getCurrentSnapshot()
+            if (condition(snapshot)) {
+                return true
+            }
+            delay(intervalMs)
+        }
+        return false
+    }
+
+    fun clickElementByTarget(target: String): Boolean {
+        val service = MyraAccessibilityService.activeService ?: return false
+        val rootNode = service.rootInActiveWindow ?: return false
+        val matched = elementMatcher.findBestMatch(rootNode, target) ?: return false
+        return matched.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
 }

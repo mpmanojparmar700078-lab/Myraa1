@@ -26,6 +26,12 @@ enum class IntentType {
     WEB_SEARCH,
     YOUTUBE_SEARCH,
     YOUTUBE_SEARCH_AND_PLAY,
+    SEARCH_AND_PLAY,
+    OPEN_PAGE,
+    RECALL_RECENT_REQUESTS,
+    REPORT_LAST_EXECUTION,
+    EXPLAIN_LAST_FAILURE,
+    RETRY_LAST_REQUEST,
     OPEN_URL,
     SET_PREFERENCE,
     WAIT,
@@ -37,12 +43,40 @@ enum class IntentType {
     UNKNOWN
 }
 
+enum class RequestState {
+    RECEIVED,
+    PARSING,
+    PLANNING,
+    EXECUTING,
+    WAITING_FOR_SCREEN,
+    VERIFYING,
+    SUCCESS,
+    PARTIAL_SUCCESS,
+    FAILED,
+    CANCELLED,
+    NEEDS_CLARIFICATION
+}
+
+data class RequestResult(
+    val requestId: Long,
+    val state: RequestState,
+    val summary: String,
+    val plannedActions: List<String> = emptyList(),
+    val completedActions: List<String> = emptyList(),
+    val failedActions: List<String> = emptyList(),
+    val actionResults: List<ActionResult> = emptyList(),
+    val isVerified: Boolean = false,
+    val failureReason: String? = null
+)
+
 data class ActionResult(
     val success: Boolean,
     val message: String,
     val launchedTarget: String? = null,
     val error: String? = null,
-    val stepResults: List<ActionResult> = emptyList()
+    val stepResults: List<ActionResult> = emptyList(),
+    val isVerified: Boolean = false,
+    val partial: Boolean = false
 )
 
 data class ParsedIntent(
@@ -50,10 +84,13 @@ data class ParsedIntent(
     val app: String? = null,
     val target: String? = null,
     val query: String? = null,
+    val targetType: String? = null,
+    val action: String? = null,
     val key: String? = null,
     val value: String? = null,
     val durationMs: Long? = null,
     val actions: List<ParsedIntent> = emptyList(),
+    val subIntents: List<ParsedIntent> = emptyList(),
     val responseText: String? = null,
     val apiId: String? = null,
     val apiParams: Map<String, String> = emptyMap(),

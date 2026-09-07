@@ -3,6 +3,7 @@ package com.example.brain
 import android.content.Context
 import android.util.Log
 import com.example.accessibility.ScreenControlEngine
+import com.example.accessibility.YouTubeResultAnalyzer
 import com.example.data.MemoryRepository
 import com.example.models.ActionResult
 import com.example.models.ActionStep
@@ -12,15 +13,17 @@ import com.example.models.ExecutionDecision
 import com.example.models.InstalledAppInfo
 import com.example.models.IntentType
 import com.example.models.ParsedIntent
+import com.example.models.RequestResult
+import com.example.models.RequestState
 import com.example.platform.android.AppLauncher
 import com.example.services.GeminiService
 import com.example.services.LocalCommandParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.json.JSONArray
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -39,7 +42,8 @@ class MyraCore(
     private val appLauncher: AppLauncher,
     private val localCommandParser: LocalCommandParser,
     private val geminiService: GeminiService,
-    private val screenControlEngine: ScreenControlEngine = ScreenControlEngine()
+    private val screenControlEngine: ScreenControlEngine = ScreenControlEngine(),
+    private val youTubeResultAnalyzer: YouTubeResultAnalyzer = YouTubeResultAnalyzer()
 ) {
 
     companion object {
@@ -49,6 +53,8 @@ class MyraCore(
 
     private val confidenceEngine = ConfidenceEngine()
     private val learningEngine = LearningEngine(memoryRepository, confidenceEngine)
+
+    val recentRequestContext = RecentRequestContext()
 
     private val currentRequestId = AtomicLong(0L)
     private val activeJob = AtomicReference<Job?>(null)
@@ -105,11 +111,113 @@ class MyraCore(
             val decision = planDecision(rawQuery, normalized, installedApps)
             logDiagnostic("DECISION", "Selected source: ${decision.source} (confidence: ${String.format("%.2f", decision.confidence)}) - ${decision.explanation}")
 
-            // 3. Execute according to decision
+            // 3. Local Context Questions (Direct Answers, No Gemini call, No screen actions)
+            when (decision.intent.type) {
+                IntentType.RECALL_RECENT_REQUESTS -> {
+                    val recallReply = recentRequestContext.formatRecallMessage()
+                    logDiagnostic("CONTEXT_QUERY", "Answering recall query: $recallReply")
+                    return ExecutionResult(
+                        replyText = recallReply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = recallReply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.REPORT_LAST_EXECUTION -> {
+                    val reportReply = recentRequestContext.formatLastExecutionReport()
+                    logDiagnostic("CONTEXT_QUERY", "Answering status report: $reportReply")
+                    return ExecutionResult(
+                        replyText = reportReply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = reportReply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.EXPLAIN_LAST_FAILURE -> {
+                    val explainReply = recentRequestContext.formatLastFailureExplanation()
+                    logDiagnostic("CONTEXT_QUERY", "Answering failure explanation: $explainReply")
+                    return ExecutionResult(
+                        replyText = explainReply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = explainReply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.RETRY_LAST_REQUEST -> {
+                    val lastReq = recentRequestContext.getLastRequest()
+                    if (lastReq != null) {
+                        logDiagnostic("RETRY", "Retrying last command: \"${lastReq.rawUserCommand}\"")
+                        return executeUserQuery(lastReq.rawUserCommand, installedApps, recentConversationContext)
+                    } else {
+                        val noCmdMsg = "दोहराने के लिए कोई पिछला एक्शन नहीं मिला।"
+                        return ExecutionResult(
+                            replyText = noCmdMsg,
+                            intent = decision.intent,
+                            actionResult = ActionResult(success = false, message = noCmdMsg),
+                            decisionSource = DecisionSource.LOCAL_PARSER,
+                            confidence = 1.0f
+                        )
+                    }
+                }
+                else -> { /* Proceed to normal execution */ }
+            }
+
+            // Record this request in RecentRequestContext
+            val plannedActions = when (decision.intent.type) {
+                IntentType.SEARCH_AND_PLAY -> listOf("OPEN_YOUTUBE", "SEARCH_QUERY", "SELECT_VIDEO", "VERIFY_PLAYBACK")
+                IntentType.YOUTUBE_SEARCH -> listOf("OPEN_YOUTUBE", "SEARCH_QUERY")
+                IntentType.OPEN_PAGE -> listOf("OPEN_BROWSER", "LOAD_URL")
+                IntentType.MULTI_ACTION -> listOf("EXECUTE_SUBTASK_1", "EXECUTE_SUBTASK_2")
+                else -> listOf("EXECUTE_ACTION")
+            }
+
+            val recordedTasks = if (decision.intent.type == IntentType.MULTI_ACTION) {
+                val subIntents = decision.intent.subIntents.ifEmpty { decision.intent.actions }
+                subIntents.mapIndexed { idx, sub ->
+                    RecordedTask(
+                        taskId = "task_${idx + 1}",
+                        rawCommand = sub.query ?: sub.app ?: rawQuery,
+                        intent = sub,
+                        targetApp = sub.app,
+                        query = sub.query,
+                        plannedActions = if (sub.type == IntentType.SEARCH_AND_PLAY) listOf("OPEN_YOUTUBE", "SEARCH_QUERY", "SELECT_VIDEO", "VERIFY_PLAYBACK") else listOf("EXECUTE_ACTION")
+                    )
+                }
+            } else {
+                listOf(
+                    RecordedTask(
+                        taskId = "task_1",
+                        rawCommand = rawQuery,
+                        intent = decision.intent,
+                        targetApp = decision.intent.app,
+                        query = decision.intent.query,
+                        plannedActions = plannedActions
+                    )
+                )
+            }
+
+            recentRequestContext.recordNewRequest(
+                requestId = requestId,
+                rawCommand = rawQuery,
+                normalizedCommand = normalized,
+                intent = decision.intent,
+                targetApp = decision.intent.app,
+                query = decision.intent.query,
+                plannedActions = plannedActions,
+                tasks = recordedTasks
+            )
+            recentRequestContext.updateRequestState(requestId, RequestState.PLANNING)
+
+            // 4. Execute according to decision
+            recentRequestContext.updateRequestState(requestId, RequestState.EXECUTING)
+
             val result = if (confidenceEngine.isConfidentForLocalExecution(decision.confidence) || decision.source != DecisionSource.GEMINI_FALLBACK) {
                 // Execute Locally! (NO GEMINI CALL)
                 logDiagnostic("LOCAL_PLANNER", "Executing LOCALLY with no Gemini call needed.")
-                executeIntentLocally(decision.intent, rawQuery, installedApps)
+                executeIntentLocally(decision.intent, rawQuery, installedApps, recordedTasks)
             } else {
                 // Gemini Fallback
                 if (!memoryRepository.isGeminiFallbackEnabled()) {
@@ -122,21 +230,39 @@ class MyraCore(
                     logDiagnostic("GEMINI_FALLBACK", "Calling Gemini API fallback for reasoning...")
                     val aiResponse = geminiService.generateResponse(rawQuery, recentConversationContext)
                     logDiagnostic("GEMINI_FALLBACK", "Gemini returned: \"${aiResponse.take(50)}...\"")
-                    ActionResult(success = true, message = aiResponse)
+                    ActionResult(success = true, isVerified = true, message = aiResponse)
                 }
             }
 
-            // 4. Update anti-loop counters
-            if (result.success) {
+            // 5. Update anti-loop counters
+            if (result.success && (result.isVerified || !result.partial)) {
                 commandFailureTracker.remove(normalized)
             } else {
                 commandFailureTracker[normalized] = previousFailures + 1
             }
 
-            // 5. Verification & Learning Loop
-            val finalReply = result.message.ifBlank { decision.intent.responseText ?: "एक्शन पूरा किया गया।" }
-            logDiagnostic("VERIFIER", "Result success=${result.success}: \"${finalReply.take(40)}\"")
+            // 6. Verification & Final Request State Calculation
+            val finalState = when {
+                result.success && result.isVerified -> RequestState.SUCCESS
+                result.partial -> RequestState.PARTIAL_SUCCESS
+                result.success -> RequestState.SUCCESS
+                else -> RequestState.FAILED
+            }
 
+            val finalReply = result.message.ifBlank { decision.intent.responseText ?: "एक्शन पूरा किया गया।" }
+            val reqResult = RequestResult(
+                requestId = requestId,
+                state = finalState,
+                summary = finalReply,
+                actionResults = result.stepResults,
+                isVerified = result.isVerified,
+                failureReason = result.error ?: if (finalState == RequestState.PARTIAL_SUCCESS) "सत्यापन अधूरा रहा" else null
+            )
+            recentRequestContext.updateRequestState(requestId, finalState, reqResult)
+
+            logDiagnostic("VERIFIER", "Result state=$finalState, verified=${result.isVerified}: \"${finalReply.take(40)}\"")
+
+            // 7. Learning Loop
             learningEngine.processCompletedRequest(
                 userQuery = rawQuery,
                 normalizedQuery = normalized,
@@ -156,14 +282,17 @@ class MyraCore(
 
         } catch (e: CancellationException) {
             logDiagnostic("MYRA_CORE", "Request #$requestId was cancelled during execution.")
+            recentRequestContext.updateRequestState(requestId, RequestState.CANCELLED)
             throw e
         } catch (e: Exception) {
-            logDiagnostic("MYRA_CORE", "Error executing request #$requestId: ${e.localizedMessage}")
-            val errorMsg = "कमांड पूरी करने में समस्या आई: ${e.localizedMessage}"
+            logDiagnostic("MYRA_CORE", "Execution error in request #$requestId: ${e.message}")
+            val errorMsg = "माफ़ कीजिए, एक्शन पूरा करने में त्रुटि आई: ${e.message}"
+            val errResult = ActionResult(success = false, message = errorMsg, error = e.localizedMessage)
+            recentRequestContext.updateRequestState(requestId, RequestState.FAILED, RequestResult(requestId = requestId, state = RequestState.FAILED, summary = errorMsg, failureReason = e.message))
             return ExecutionResult(
                 replyText = errorMsg,
                 intent = ParsedIntent(type = IntentType.UNKNOWN),
-                actionResult = ActionResult(success = false, message = errorMsg, error = e.localizedMessage),
+                actionResult = errResult,
                 decisionSource = DecisionSource.LOCAL_PARSER,
                 confidence = 0.0f
             )
@@ -175,40 +304,24 @@ class MyraCore(
         normalized: String,
         installedApps: List<InstalledAppInfo>
     ): ExecutionDecision {
-        // Step 2a: Check Local Command Parser
+        // Step 2a: Deterministic Local Parser
         val localResult = localCommandParser.parse(rawQuery)
         if (localResult.handled && localResult.intent != null) {
-            val conf = localResult.confidence
-            logDiagnostic("LOCAL_PARSER", "Intent matched: ${localResult.intent.type} (confidence: $conf)")
             return ExecutionDecision(
                 source = DecisionSource.LOCAL_PARSER,
                 intent = localResult.intent,
-                confidence = conf,
-                explanation = "Matched local grammar & semantic patterns"
+                confidence = localResult.intent.confidence,
+                explanation = "Matched local deterministic rule: ${localResult.intent.type}"
             )
         }
 
-        // Step 2b: Check Learned Skills
-        val skills = memoryRepository.getEnabledSkills()
-        for (skill in skills) {
-            val isMatched = try {
-                val triggers = JSONArray(skill.triggerPatternsJson)
-                var found = false
-                for (i in 0 until triggers.length()) {
-                    val t = triggers.getString(i).lowercase()
-                    if (normalized == t || normalized.contains(t) || t.contains(normalized)) {
-                        found = true
-                        break
-                    }
-                }
-                found
-            } catch (e: Exception) {
-                false
-            }
-
-            if (isMatched) {
+        // Step 2b: Local Learned Skills
+        val learnedSkills = memoryRepository.getEnabledSkills()
+        for (skill in learnedSkills) {
+            if (!skill.isEnabled) continue
+            val patterns = skill.triggerPatternsJson.replace("[", "").replace("]", "").replace("\"", "").split(",").map { it.trim().lowercase() }
+            if (patterns.any { normalized.contains(it) || it.contains(normalized) }) {
                 val conf = confidenceEngine.calculateSkillConfidence(skill)
-                logDiagnostic("SKILL", "Matched Learned Skill: '${skill.skillName}' (confidence: $conf)")
                 return ExecutionDecision(
                     source = DecisionSource.LEARNED_SKILL,
                     intent = ParsedIntent(
@@ -218,23 +331,22 @@ class MyraCore(
                         confidence = conf
                     ),
                     confidence = conf,
-                    explanation = "Matched learned skill '${skill.skillName}' v${skill.version}",
+                    explanation = "Matched learned skill: '${skill.skillName}' (confidence: ${String.format("%.2f", conf)})",
                     matchedSkillId = skill.id
                 )
             }
         }
 
-        // Step 2c: Check Experience Memory
+        // Step 2c: Past Direct Experience
         val exactExp = memoryRepository.findExactExperience(normalized)
-        if (exactExp != null && exactExp.resultSuccess) {
+        if (exactExp != null) {
             val conf = confidenceEngine.calculateExperienceConfidence(exactExp)
-            if (conf >= 0.70f) {
+            if (conf >= ConfidenceEngine.THRESHOLD_LOCAL_EXECUTION) {
                 val parsedType = try {
                     IntentType.valueOf(exactExp.intentType)
                 } catch (e: Exception) {
-                    IntentType.OPEN_APP
+                    IntentType.GENERAL_CHAT
                 }
-                logDiagnostic("MEMORY", "Matched past experience with confidence $conf (successes: ${exactExp.successCount})")
                 return ExecutionDecision(
                     source = DecisionSource.EXPERIENCE_MEMORY,
                     intent = ParsedIntent(
@@ -263,9 +375,24 @@ class MyraCore(
     private suspend fun executeIntentLocally(
         intent: ParsedIntent,
         rawQuery: String,
-        installedApps: List<InstalledAppInfo>
+        installedApps: List<InstalledAppInfo>,
+        tasks: List<RecordedTask> = emptyList()
     ): ActionResult {
         return when (intent.type) {
+            IntentType.SEARCH_AND_PLAY, IntentType.YOUTUBE_SEARCH_AND_PLAY -> {
+                val task = tasks.firstOrNull()
+                executeYouTubeSearchAndPlay(intent, rawQuery, task)
+            }
+
+            IntentType.OPEN_PAGE -> {
+                val task = tasks.firstOrNull()
+                executeOpenPage(intent, rawQuery, task)
+            }
+
+            IntentType.MULTI_ACTION -> {
+                executeMultiAction(intent, rawQuery, installedApps, tasks)
+            }
+
             IntentType.OPEN_APP -> {
                 val targetApp = intent.app?.lowercase() ?: ""
                 when {
@@ -295,9 +422,14 @@ class MyraCore(
                 appLauncher.performWebSearch(q)
             }
 
-            IntentType.YOUTUBE_SEARCH, IntentType.YOUTUBE_SEARCH_AND_PLAY -> {
+            IntentType.YOUTUBE_SEARCH -> {
                 val q = intent.query ?: rawQuery
-                appLauncher.searchYouTube(q)
+                val res = appLauncher.searchYouTube(q)
+                ActionResult(
+                    success = res.success,
+                    isVerified = res.success,
+                    message = if (res.success) "YouTube पर '$q' खोजा जा रहा है..." else "YouTube खोजने में विफल"
+                )
             }
 
             IntentType.OPEN_URL -> {
@@ -307,32 +439,32 @@ class MyraCore(
 
             IntentType.GO_BACK -> {
                 screenControlEngine.executeStep(ActionStep(stepId = 1, actionType = "BACK"))
-                ActionResult(success = true, message = "पीछे जाया गया।")
+                ActionResult(success = true, isVerified = true, message = "पीछे जाया गया।")
             }
 
             IntentType.GO_HOME -> {
                 screenControlEngine.executeStep(ActionStep(stepId = 1, actionType = "HOME"))
-                ActionResult(success = true, message = "होम स्क्रीन पर जाया गया।")
+                ActionResult(success = true, isVerified = true, message = "होम स्क्रीन पर जाया गया।")
             }
 
             IntentType.SCROLL_DOWN -> {
                 screenControlEngine.executeStep(ActionStep(stepId = 1, actionType = "SCROLL_DOWN"))
-                ActionResult(success = true, message = "नीचे स्क्रॉल किया गया।")
+                ActionResult(success = true, isVerified = true, message = "नीचे स्क्रॉल किया गया।")
             }
 
             IntentType.SCROLL_UP -> {
                 screenControlEngine.executeStep(ActionStep(stepId = 1, actionType = "SCROLL_UP"))
-                ActionResult(success = true, message = "ऊपर स्क्रॉल किया गया।")
+                ActionResult(success = true, isVerified = true, message = "ऊपर स्क्रॉल किया गया।")
             }
 
             IntentType.PLAY -> {
                 screenControlEngine.executeStep(ActionStep(stepId = 1, actionType = "CLICK", target = "play"))
-                ActionResult(success = true, message = "प्ले किया जा रहा है।")
+                ActionResult(success = true, isVerified = true, message = "प्ले किया जा रहा है।")
             }
 
             IntentType.PAUSE -> {
                 screenControlEngine.executeStep(ActionStep(stepId = 1, actionType = "CLICK", target = "pause"))
-                ActionResult(success = true, message = "पॉज़ किया गया।")
+                ActionResult(success = true, isVerified = true, message = "पॉज़ किया गया।")
             }
 
             IntentType.READ_SCREEN -> {
@@ -343,29 +475,230 @@ class MyraCore(
                 } else {
                     "स्क्रीन पर कोई टेक्स्ट नहीं मिला (एक्सेसिबिलिटी परमिशन चेक करें)।"
                 }
-                ActionResult(success = true, message = summary)
+                ActionResult(success = true, isVerified = true, message = summary)
             }
 
             IntentType.EXECUTE_SKILL -> {
                 if (intent.target != null) {
                     appLauncher.launchAppByPackage(intent.target)
                 }
-                ActionResult(success = true, message = "स्किल '${intent.skillName}' निष्पादित किया गया।")
+                ActionResult(success = true, isVerified = true, message = "स्किल '${intent.skillName}' निष्पादित किया गया।")
             }
 
             IntentType.CANCEL_REQUEST -> {
                 cancelActiveRequest()
-                ActionResult(success = true, message = "कमांड रद्द की गई।")
+                ActionResult(success = true, isVerified = true, message = "कमांड रद्द की गई।")
             }
 
             IntentType.CLEAR_CHAT -> {
-                ActionResult(success = true, message = "चैट साफ़ की गई।")
+                ActionResult(success = true, isVerified = true, message = "चैट साफ़ की गई।")
             }
 
             else -> {
                 val reply = intent.responseText ?: "कमांड पूरी की गई।"
-                ActionResult(success = true, message = reply)
+                ActionResult(success = true, isVerified = true, message = reply)
             }
         }
+    }
+
+    private suspend fun executeYouTubeSearchAndPlay(
+        intent: ParsedIntent,
+        rawQuery: String,
+        task: RecordedTask?
+    ): ActionResult {
+        val query = intent.query ?: rawQuery
+        logDiagnostic("SEARCH_AND_PLAY", "Starting YouTube Search & Play workflow for: '$query'")
+
+        // Step 1: Launch Search in YouTube
+        val launchResult = appLauncher.searchYouTube(query)
+        if (!launchResult.success) {
+            task?.failedActions?.add("OPEN_YOUTUBE")
+            task?.state = RequestState.FAILED
+            return ActionResult(
+                success = false,
+                isVerified = false,
+                partial = false,
+                message = "YouTube खोलने में समस्या आई: ${launchResult.message}",
+                error = launchResult.error
+            )
+        }
+        task?.completedActions?.add("OPEN_YOUTUBE")
+
+        // If accessibility service is not active, we cannot perform screen click or verification
+        if (!screenControlEngine.isAccessibilityActive) {
+            logDiagnostic("SEARCH_AND_PLAY", "Accessibility service not active - cannot verify playback")
+            task?.state = RequestState.PARTIAL_SUCCESS
+            return ActionResult(
+                success = false,
+                partial = true,
+                isVerified = false,
+                message = "मैंने YouTube पर '$query' खोजने की कोशिश की, लेकिन एक्सेसिबिलिटी अनुमति बंद होने के कारण playback verify नहीं हो पाया।"
+            )
+        }
+
+        // Step 2: Wait for YouTube foreground
+        task?.state = RequestState.WAITING_FOR_SCREEN
+        val isForeground = screenControlEngine.waitForPackage("youtube", timeoutMs = 2500L)
+        if (isForeground) {
+            task?.completedActions?.add("VERIFY_YOUTUBE_FOREGROUND")
+        }
+
+        // Step 3: Wait for search results to populate
+        delay(1500L)
+        val snapshotAfterSearch = screenControlEngine.getCurrentSnapshot()
+
+        // Step 4: Semantic matching for video selection
+        val matchedVideo = youTubeResultAnalyzer.findBestMatchingVideo(snapshotAfterSearch.visibleNodes, query)
+            ?: youTubeResultAnalyzer.findFirstVideoItem(snapshotAfterSearch.visibleNodes)
+
+        if (matchedVideo != null) {
+            task?.completedActions?.add("READ_RESULTS")
+            val targetName = matchedVideo.contentDescription ?: matchedVideo.text ?: query
+            val clicked = if (matchedVideo.contentDescription != null) {
+                screenControlEngine.clickElementByTarget(matchedVideo.contentDescription!!)
+            } else if (matchedVideo.text != null) {
+                screenControlEngine.clickElementByTarget(matchedVideo.text!!)
+            } else {
+                false
+            }
+
+            if (clicked) {
+                task?.completedActions?.add("SELECT_VIDEO")
+            } else {
+                task?.failedActions?.add("SELECT_VIDEO")
+            }
+        } else {
+            task?.failedActions?.add("READ_RESULTS")
+        }
+
+        // Step 5: Verification of Playback State
+        task?.state = RequestState.VERIFYING
+        delay(2000L)
+        val playbackSnapshot = screenControlEngine.getCurrentSnapshot()
+        val playbackStarted = youTubeResultAnalyzer.verifyPlaybackStarted(playbackSnapshot.visibleNodes)
+        val isPlayerVisible = youTubeResultAnalyzer.isPlayerScreenVisible(playbackSnapshot.visibleNodes)
+
+        return if (playbackStarted) {
+            task?.completedActions?.add("VERIFY_PLAYBACK")
+            task?.state = RequestState.SUCCESS
+            logDiagnostic("SEARCH_AND_PLAY", "Playback VERIFIED successfully for '$query'")
+            ActionResult(
+                success = true,
+                isVerified = true,
+                partial = false,
+                message = "YouTube पर '$query' का वीडियो चालू हो गया है।"
+            )
+        } else if (isPlayerVisible) {
+            // Player is visible, try clicking play button if available
+            val playBtn = youTubeResultAnalyzer.findPlayButton(playbackSnapshot.visibleNodes)
+            if (playBtn != null && playBtn.contentDescription != null) {
+                screenControlEngine.clickElementByTarget(playBtn.contentDescription!!)
+                delay(1000L)
+                val recheck = screenControlEngine.getCurrentSnapshot()
+                if (youTubeResultAnalyzer.verifyPlaybackStarted(recheck.visibleNodes)) {
+                    task?.completedActions?.add("VERIFY_PLAYBACK")
+                    task?.state = RequestState.SUCCESS
+                    return ActionResult(
+                        success = true,
+                        isVerified = true,
+                        partial = false,
+                        message = "YouTube पर '$query' का वीडियो चालू हो गया है।"
+                    )
+                }
+            }
+            task?.completedActions?.add("VERIFY_PLAYER")
+            task?.failedActions?.add("VERIFY_PLAYBACK")
+            task?.state = RequestState.PARTIAL_SUCCESS
+            ActionResult(
+                success = false,
+                partial = true,
+                isVerified = false,
+                message = "मैंने YouTube पर '$query' वीडियो खोला है, लेकिन playback verify नहीं कर पाया।"
+            )
+        } else {
+            task?.failedActions?.add("VERIFY_PLAYBACK")
+            task?.state = RequestState.PARTIAL_SUCCESS
+            ActionResult(
+                success = false,
+                partial = true,
+                isVerified = false,
+                message = "मैंने YouTube पर '$query' खोजने की कोशिश की, लेकिन वीडियो playback verify नहीं हो पाया।"
+            )
+        }
+    }
+
+    private suspend fun executeOpenPage(
+        intent: ParsedIntent,
+        rawQuery: String,
+        task: RecordedTask?
+    ): ActionResult {
+        val target = intent.target ?: intent.query ?: rawQuery
+        val cleanUrl = if (target.startsWith("http://") || target.startsWith("https://")) {
+            target
+        } else {
+            "https://www.google.com/search?q=${android.net.Uri.encode(target)}"
+        }
+
+        val launchResult = appLauncher.openUrl(cleanUrl)
+        if (!launchResult.success) {
+            task?.failedActions?.add("LOAD_URL")
+            task?.state = RequestState.FAILED
+            return ActionResult(
+                success = false,
+                isVerified = false,
+                message = "Chrome खोलने में समस्या आई: ${launchResult.message}"
+            )
+        }
+        task?.completedActions?.add("LOAD_URL")
+
+        val isChromeForeground = if (screenControlEngine.isAccessibilityActive) {
+            screenControlEngine.waitForPackage("chrome", timeoutMs = 2000L)
+        } else {
+            false
+        }
+
+        if (isChromeForeground) {
+            task?.completedActions?.add("VERIFY_BROWSER_FOREGROUND")
+            task?.state = RequestState.SUCCESS
+        } else {
+            task?.state = RequestState.PARTIAL_SUCCESS
+        }
+
+        return ActionResult(
+            success = true,
+            isVerified = isChromeForeground,
+            partial = !isChromeForeground,
+            message = "Chrome में '$target' खोला गया।"
+        )
+    }
+
+    private suspend fun executeMultiAction(
+        intent: ParsedIntent,
+        rawQuery: String,
+        installedApps: List<InstalledAppInfo>,
+        tasks: List<RecordedTask>
+    ): ActionResult {
+        val subIntents = intent.subIntents.ifEmpty { intent.actions }
+        val stepResults = mutableListOf<ActionResult>()
+
+        for (i in subIntents.indices) {
+            val sub = subIntents[i]
+            val subTask = tasks.getOrNull(i)
+            val stepResult = executeIntentLocally(sub, sub.query ?: rawQuery, installedApps, listOfNotNull(subTask))
+            stepResults.add(stepResult)
+            delay(1000L)
+        }
+
+        val allSuccess = stepResults.all { it.success && it.isVerified }
+        val anyPartial = stepResults.any { it.partial || !it.isVerified }
+        val combinedMessage = stepResults.joinToString("\n") { it.message }
+
+        return ActionResult(
+            success = allSuccess,
+            isVerified = allSuccess,
+            partial = anyPartial,
+            message = combinedMessage,
+            stepResults = stepResults
+        )
     }
 }

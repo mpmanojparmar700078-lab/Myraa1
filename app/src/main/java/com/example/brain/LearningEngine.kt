@@ -49,7 +49,8 @@ class LearningEngine(
             return
         }
 
-        val success = actionResult.success && (chainResult?.success ?: true)
+        // Only verified outcomes should strengthen skill confidence; intermediate or partial action success is not request success
+        val success = actionResult.success && (chainResult?.success ?: true) && !actionResult.partial && (actionResult.isVerified || decision.source == DecisionSource.LOCAL_PARSER)
 
         if (success) {
             handleSuccess(userQuery, normalizedQuery, decision, actionResult, chainResult, screenSnapshot)
