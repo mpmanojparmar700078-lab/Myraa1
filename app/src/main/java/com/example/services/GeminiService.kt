@@ -101,6 +101,43 @@ class GeminiService(private val getCustomApiKey: () -> String) {
         generateOfflineFallback(prompt, hasCustomKey = true)
     }
 
+    suspend fun validateApiKey(testKey: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val trimmed = testKey.trim()
+        if (trimmed.isBlank()) {
+            return@withContext Pair(false, "API Key खाली है। कृपया Google AI Studio से अपनी key डालें।")
+        }
+
+        try {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$trimmed"
+            val requestJson = JSONObject().apply {
+                val contents = JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().apply { put("text", "Say OK") })
+                        })
+                    })
+                }
+                put("contents", contents)
+            }
+            val body = requestJson.toString().toRequestBody(jsonMediaType)
+            val request = Request.Builder().url(url).post(body).build()
+
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    Pair(true, "API Key मान्य (Valid) है और सक्रिय रूप से कनेक्ट हो गई!")
+                } else {
+                    val errJson = try { JSONObject(responseBody).optJSONObject("error") } catch (e: Exception) { null }
+                    val message = errJson?.optString("message") ?: "HTTP ${response.code}"
+                    Pair(false, "अमान्य API Key (${response.code}): $message")
+                }
+            }
+        } catch (e: Exception) {
+            Pair(false, "कनेक्शन त्रुटि: ${e.localizedMessage ?: "इंटरनेट कनेक्शन चेक करें"}")
+        }
+    }
+
     private fun generateOfflineFallback(prompt: String, hasCustomKey: Boolean): String {
         val lower = prompt.lowercase()
         return when {

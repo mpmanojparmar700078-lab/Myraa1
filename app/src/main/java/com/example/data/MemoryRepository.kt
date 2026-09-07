@@ -251,8 +251,8 @@ class MemoryRepository(
         return prefs.getString(PREF_CUSTOM_API_KEY, "") ?: ""
     }
 
-    fun setCustomApiKey(key: String) {
-        prefs.edit().putString(PREF_CUSTOM_API_KEY, key).apply()
+    fun setCustomApiKey(key: String): Boolean {
+        return prefs.edit().putString(PREF_CUSTOM_API_KEY, key.trim()).commit()
     }
 
     fun isForegroundServiceEnabled(): Boolean {

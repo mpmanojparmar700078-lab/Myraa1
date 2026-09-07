@@ -9,6 +9,7 @@ import com.example.data.LearnedSkillEntity
 import com.example.data.MemoryRepository
 import com.example.data.MessageEntity
 import com.example.data.MyraDatabase
+import com.example.models.ApiKeyValidationState
 import com.example.models.AssistantState
 import com.example.models.DiagnosticLog
 import com.example.models.InstalledAppInfo
@@ -95,6 +96,9 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _customApiKey = MutableStateFlow(memoryRepository.getCustomApiKey())
     val customApiKey: StateFlow<String> = _customApiKey.asStateFlow()
+
+    private val _apiKeyValidationState = MutableStateFlow<ApiKeyValidationState>(ApiKeyValidationState.Idle)
+    val apiKeyValidationState: StateFlow<ApiKeyValidationState> = _apiKeyValidationState.asStateFlow()
 
     private val _isForegroundServiceActive = MutableStateFlow(memoryRepository.isForegroundServiceEnabled())
     val isForegroundServiceActive: StateFlow<Boolean> = _isForegroundServiceActive.asStateFlow()
@@ -271,8 +275,33 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun setCustomApiKey(key: String) {
-        _customApiKey.value = key
-        memoryRepository.setCustomApiKey(key)
+        val trimmed = key.trim()
+        _customApiKey.value = trimmed
+        memoryRepository.setCustomApiKey(trimmed)
+    }
+
+    fun validateAndSaveApiKey(key: String) {
+        val trimmed = key.trim()
+        if (trimmed.isBlank()) {
+            setCustomApiKey("")
+            _apiKeyValidationState.value = ApiKeyValidationState.Success("API Key हटा दी गई (Cleared)")
+            return
+        }
+
+        viewModelScope.launch {
+            _apiKeyValidationState.value = ApiKeyValidationState.Validating
+            val (isValid, message) = geminiService.validateApiKey(trimmed)
+            if (isValid) {
+                setCustomApiKey(trimmed)
+                _apiKeyValidationState.value = ApiKeyValidationState.Success(message)
+            } else {
+                _apiKeyValidationState.value = ApiKeyValidationState.Error(message)
+            }
+        }
+    }
+
+    fun resetApiKeyValidationState() {
+        _apiKeyValidationState.value = ApiKeyValidationState.Idle
     }
 
     fun setForegroundServiceEnabled(enabled: Boolean) {

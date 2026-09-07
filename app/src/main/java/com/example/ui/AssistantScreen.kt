@@ -104,6 +104,7 @@ fun AssistantScreen(
     val skillCount by viewModel.skillCount.collectAsState()
     val experienceCount by viewModel.experienceCount.collectAsState()
     val diagnosticLogs by viewModel.diagnosticLogs.collectAsState()
+    val apiKeyValidationState by viewModel.apiKeyValidationState.collectAsState()
 
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showBrainDialog by remember { mutableStateOf(false) }
@@ -510,7 +511,10 @@ fun AssistantScreen(
             isGeminiFallbackEnabled = isGeminiFallbackEnabled,
             skillCount = skillCount,
             experienceCount = experienceCount,
+            apiKeyValidationState = apiKeyValidationState,
             onSaveApiKey = { viewModel.setCustomApiKey(it) },
+            onValidateAndSaveApiKey = { viewModel.validateAndSaveApiKey(it) },
+            onResetValidationState = { viewModel.resetApiKeyValidationState() },
             onSelectLanguage = { viewModel.setSpeechLanguage(it) },
             onToggleVoiceOutput = { viewModel.setVoiceOutputEnabled(it) },
             onToggleForegroundService = { viewModel.setForegroundServiceEnabled(it) },
