@@ -54,6 +54,17 @@ enum class IntentType {
     PUBLIC_API,
     GENERAL_CHAT,
     GREETING,
+    QUESTION,
+    NEW_COMMAND,
+    NAVIGATE,
+    ACTION_CHAIN,
+    CONTEXT_QUERY,
+    RECALL_REQUEST,
+    EXECUTION_STATUS_QUERY,
+    FAILURE_FEEDBACK,
+    CORRECTION,
+    RETRY_REQUEST,
+    EXECUTION_PREFERENCE,
     MEMORY_QUERY,
     CONFIRMATION,
     DENIAL,
@@ -95,13 +106,57 @@ enum class ResponseType {
 }
 
 enum class ExecutionStatus {
+    NOT_STARTED,
+    PLANNED,
+    RUNNING,
+    IN_PROGRESS,
     SUCCESS,
     PARTIAL_SUCCESS,
     FAILED,
     CANCELLED,
-    IN_PROGRESS,
     NOT_EXECUTED
 }
+
+enum class ContextReferenceType {
+    REQUEST_INDEX,
+    LAST_REQUEST,
+    LAST_FAILURE,
+    RELATIVE
+}
+
+data class ContextReference(
+    val type: ContextReferenceType,
+    val index: Int? = null,
+    val rawRef: String? = null
+)
+
+data class ParsedCommand(
+    val rawText: String,
+    val normalizedText: String,
+    val intent: IntentType,
+    val targetApp: String? = null,
+    val target: String? = null,
+    val query: String? = null,
+    val action: String? = null,
+    val parameters: Map<String, String> = emptyMap(),
+    val contextReference: ContextReference? = null,
+    val confidence: Float = 1.0f,
+    val preference: String? = null,
+    val subCommands: List<ParsedCommand> = emptyList(),
+    val category: MessageCategory = MessageCategory.UNKNOWN
+)
+
+data class RequestRecord(
+    val requestId: Long,
+    val timestamp: Long = System.currentTimeMillis(),
+    val rawUserMessage: String,
+    val normalizedMessage: String,
+    val parsedCommand: ParsedCommand,
+    var executionStatus: ExecutionStatus = ExecutionStatus.NOT_STARTED,
+    val executionSteps: MutableList<ExecutionStep> = mutableListOf(),
+    var verificationResult: Boolean = false,
+    var finalResult: String? = null
+)
 
 enum class PendingConfirmationType {
     RETRY_PREVIOUS,

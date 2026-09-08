@@ -299,8 +299,8 @@ class MyraResponseEngine(
             ExecutionStatus.PARTIAL_SUCCESS -> ResponseType.PARTIAL_SUCCESS
             ExecutionStatus.FAILED -> ResponseType.ACTION_FAILURE
             ExecutionStatus.CANCELLED -> ResponseType.CANCELLATION
-            ExecutionStatus.IN_PROGRESS -> ResponseType.ACTION_PROGRESS
-            ExecutionStatus.NOT_EXECUTED -> ResponseType.TEXT
+            ExecutionStatus.IN_PROGRESS, ExecutionStatus.RUNNING -> ResponseType.ACTION_PROGRESS
+            ExecutionStatus.NOT_EXECUTED, ExecutionStatus.NOT_STARTED, ExecutionStatus.PLANNED -> ResponseType.TEXT
         }
 
         return GeneratedResponse(

@@ -44,7 +44,51 @@ class RecentRequestContext(
     private val resultReporter: ResultReporter = ResultReporter()
 ) {
     private val history = ConcurrentLinkedDeque<RecordedRequest>()
+    private val structuredHistory = ConcurrentLinkedDeque<com.example.models.RequestRecord>()
     private val maxHistorySize = 25
+
+    fun recordStructuredRequest(
+        requestId: Long,
+        rawUserMessage: String,
+        normalizedMessage: String,
+        parsedCommand: com.example.models.ParsedCommand
+    ): com.example.models.RequestRecord {
+        val record = com.example.models.RequestRecord(
+            requestId = requestId,
+            rawUserMessage = rawUserMessage,
+            normalizedMessage = normalizedMessage,
+            parsedCommand = parsedCommand,
+            executionStatus = com.example.models.ExecutionStatus.PLANNED
+        )
+        structuredHistory.addLast(record)
+        while (structuredHistory.size > maxHistorySize) {
+            structuredHistory.removeFirst()
+        }
+        return record
+    }
+
+    fun updateStructuredExecutionStatus(
+        requestId: Long,
+        status: com.example.models.ExecutionStatus,
+        isVerified: Boolean = false,
+        finalResult: String? = null
+    ) {
+        val record = structuredHistory.find { it.requestId == requestId } ?: return
+        record.executionStatus = status
+        record.verificationResult = isVerified
+        if (finalResult != null) {
+            record.finalResult = finalResult
+        }
+    }
+
+    fun getLastStructuredRecord(): com.example.models.RequestRecord? {
+        return structuredHistory.lastOrNull()
+    }
+
+    fun getStructuredRecordByIndex(index: Int): com.example.models.RequestRecord? {
+        val recents = structuredHistory.toList().reversed()
+        return if (index in 1..recents.size) recents[index - 1] else null
+    }
 
     fun recordNewRequest(
         requestId: Long,
@@ -106,6 +150,12 @@ class RecentRequestContext(
             summary = "काम पूरा नहीं हुआ",
             failureReason = reason
         )).copy(state = RequestState.FAILED, failureReason = reason)
+
+        val lastRecord = getLastStructuredRecord()
+        if (lastRecord != null) {
+            lastRecord.executionStatus = com.example.models.ExecutionStatus.FAILED
+            lastRecord.finalResult = reason
+        }
     }
 
     fun markLastRequestMisinterpreted(correction: String) {
@@ -124,6 +174,12 @@ class RecentRequestContext(
             wasMisinterpreted = true,
             failureReason = "Intent misclassified: $correction"
         )
+
+        val lastRecord = getLastStructuredRecord()
+        if (lastRecord != null) {
+            lastRecord.executionStatus = com.example.models.ExecutionStatus.FAILED
+            lastRecord.finalResult = "Misinterpreted: $correction"
+        }
     }
 
     fun getLastRequest(): RecordedRequest? {

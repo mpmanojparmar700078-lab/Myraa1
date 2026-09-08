@@ -23,7 +23,9 @@ import com.example.models.ScreenNodeInfo
 import com.example.services.LocalCommandParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -597,5 +599,211 @@ class MyraBrainUnitTest {
         )
 
         assertTrue("Verified response must confirm playback", verifiedResponse.text.contains("चल रहा है") || verifiedResponse.text.contains("पूरा हुआ"))
+    }
+
+    // =========================================================================
+    // COMMAND ENCODING & PARSING ENGINE V2 TEST SUITE (Section 15)
+    // =========================================================================
+
+    @Test
+    fun test31_CommandEncodingV2_YouTubeDesiGamer() {
+        val raw = "youtube par desi gamer ka video play kro"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.SEARCH_AND_PLAY, cmd.intent)
+        assertEquals("YouTube", cmd.targetApp)
+        assertEquals("PLAY_VIDEO", cmd.action)
+        assertEquals("desi gamer", cmd.query)
+        assertFalse("Must NOT contain 'ka kro'", cmd.query?.contains("ka kro") == true)
+        assertFalse("Must NOT contain 'video'", cmd.query?.contains("video") == true)
+        assertFalse("Must NOT contain 'play'", cmd.query?.contains("play") == true)
+        assertFalse("Must NOT contain 'kro'", cmd.query?.contains("kro") == true)
+
+        // LocalCommandParser compatibility check
+        val localRes = parser.parse(raw)
+        assertTrue(localRes.handled)
+        assertEquals("desi gamer", localRes.intent?.query?.lowercase())
+        assertEquals("youtube", localRes.intent?.app?.lowercase())
+    }
+
+    @Test
+    fun test32_CommandEncodingV2_OpenInChrome() {
+        val raw = "open free fire crafland in chrome"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals("Chrome", cmd.targetApp)
+        assertEquals("OPEN_PAGE", cmd.action)
+        assertTrue("Query should be free fire crafland", cmd.query?.contains("free fire crafland") == true || cmd.query?.contains("free fire craftland") == true)
+        assertFalse("Must not contain trailing 'in'", cmd.query?.endsWith(" in") == true)
+        assertFalse("Must not contain 'chrome'", cmd.query?.contains("chrome") == true)
+    }
+
+    @Test
+    fun test33_CommandEncodingV2_ContextRecallQuery() {
+        val raw = "mene kya bola"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.RECALL_REQUEST, cmd.intent)
+        assertEquals(MessageCategory.CONTEXT_QUESTION, cmd.category)
+        assertNull("Must NEVER extract search query from context recall", cmd.query)
+    }
+
+    @Test
+    fun test34_CommandEncodingV2_ExecutionStatusQuery() {
+        val raw = "tumne kya kiya"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.EXECUTION_STATUS_QUERY, cmd.intent)
+        assertEquals(MessageCategory.EXECUTION_STATUS, cmd.category)
+        assertNull("Must NEVER extract search query from status query", cmd.query)
+    }
+
+    @Test
+    fun test35_CommandEncodingV2_FailureFeedback() {
+        val raw = "nahi hua"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.FAILURE_FEEDBACK, cmd.intent)
+        assertEquals(MessageCategory.FAILURE_FEEDBACK, cmd.category)
+        assertNull("Must NEVER extract search query from failure feedback", cmd.query)
+    }
+
+    @Test
+    fun test36_CommandEncodingV2_FailureFeedbackExtended() {
+        val raw = "nahi hua or youtube par video play bhi nhi hua tha"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.FAILURE_FEEDBACK, cmd.intent)
+        assertEquals(MessageCategory.FAILURE_FEEDBACK, cmd.category)
+        assertNull("Must NEVER extract search query from failure feedback extended", cmd.query)
+
+        // Also test LocalCommandParser
+        val localRes = parser.parse(raw)
+        assertTrue(localRes.handled)
+        assertEquals(MessageCategory.FAILURE_FEEDBACK, localRes.category)
+        assertNotEquals(IntentType.SEARCH, localRes.intent?.type)
+        assertNotEquals(IntentType.YOUTUBE_SEARCH, localRes.intent?.type)
+        assertNotEquals(IntentType.SEARCH_AND_PLAY, localRes.intent?.type)
+    }
+
+    @Test
+    fun test37_CommandEncodingV2_MetaInstruction() {
+        val raw = "me chahta hu vo sare steps youtube par ho or vo tum khud kro"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.EXECUTION_PREFERENCE, cmd.intent)
+        assertEquals(MessageCategory.META_INSTRUCTION, cmd.category)
+        assertEquals("assistant_should_perform_steps_itself", cmd.preference)
+        assertEquals("YouTube", cmd.targetApp)
+        assertNull("Must NEVER extract search query from meta instruction", cmd.query)
+    }
+
+    @Test
+    fun test38_CommandEncodingV2_RetryRequest() {
+        val raw = "dobara karo"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.RETRY_REQUEST, cmd.intent)
+        assertEquals(MessageCategory.RETRY_REQUEST, cmd.category)
+        assertNull("Must NEVER extract search query from retry request", cmd.query)
+    }
+
+    @Test
+    fun test39_CommandEncodingV2_CancelRequest() {
+        val raw = "cancel karo"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.CANCEL_REQUEST, cmd.intent)
+        assertEquals(MessageCategory.CANCEL_REQUEST, cmd.category)
+        assertNull("Must NEVER extract search query from cancel request", cmd.query)
+    }
+
+    @Test
+    fun test40_CommandEncodingV2_NumberedReferenceExecutionStatus() {
+        val raw = "1 wale me tumne kya kiya"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.EXECUTION_STATUS_QUERY, cmd.intent)
+        assertEquals(MessageCategory.EXECUTION_STATUS, cmd.category)
+        assertEquals(com.example.models.ContextReferenceType.REQUEST_INDEX, cmd.contextReference?.type)
+        assertEquals(1, cmd.contextReference?.index)
+        assertNull("Must NEVER extract search query from numbered context query", cmd.query)
+    }
+
+    @Test
+    fun test41_CommandEncodingV2_MultiIntentCommand() {
+        val raw = "chrome kholo aur google par free fire search karo"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.ACTION_CHAIN, cmd.intent)
+        assertEquals(2, cmd.subCommands.size)
+
+        val sub1 = cmd.subCommands[0]
+        assertEquals(IntentType.OPEN_APP, sub1.intent)
+        assertEquals("Chrome", sub1.targetApp)
+
+        val sub2 = cmd.subCommands[1]
+        assertEquals(IntentType.SEARCH, sub2.intent)
+        assertEquals("Google", sub2.targetApp)
+        assertEquals("free fire", sub2.query)
+    }
+
+    @Test
+    fun test42_CommandEncodingV2_Correction() {
+        val raw = "maine ye nahi bola"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val classification = com.example.brain.IntentClassifier.classify(norm, raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, classification)
+
+        assertEquals(IntentType.CORRECTION, cmd.intent)
+        assertEquals(MessageCategory.CORRECTION, cmd.category)
+        assertNull("Must NEVER extract search query from correction", cmd.query)
+
+        val localRes = parser.parse(raw)
+        assertTrue(localRes.handled)
+        assertEquals(MessageCategory.CORRECTION, localRes.category)
+    }
+
+    @Test
+    fun test43_PlannedNotEqualSuccess_VerificationRule() {
+        val recentContext = com.example.brain.RecentRequestContext()
+        val raw = "youtube par desi gamer ka video play kro"
+        val norm = com.example.brain.TextNormalizer.normalize(raw)
+        val cmd = com.example.brain.CommandEncoder.encode(raw, norm, com.example.brain.IntentClassifier.classify(norm, raw))
+
+        val record = recentContext.recordStructuredRequest(1001L, raw, norm, cmd)
+        assertEquals(ExecutionStatus.PLANNED, record.executionStatus)
+        assertFalse(record.verificationResult)
+
+        // Only after actual verification should it be marked SUCCESS
+        recentContext.updateStructuredExecutionStatus(1001L, ExecutionStatus.PARTIAL_SUCCESS, isVerified = false)
+        assertEquals(ExecutionStatus.PARTIAL_SUCCESS, recentContext.getLastStructuredRecord()?.executionStatus)
+        assertFalse(recentContext.getLastStructuredRecord()?.verificationResult == true)
+
+        recentContext.updateStructuredExecutionStatus(1001L, ExecutionStatus.SUCCESS, isVerified = true, finalResult = "Playback active")
+        assertEquals(ExecutionStatus.SUCCESS, recentContext.getLastStructuredRecord()?.executionStatus)
+        assertTrue(recentContext.getLastStructuredRecord()?.verificationResult == true)
     }
 }

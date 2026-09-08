@@ -16,7 +16,7 @@ class LocalCommandParser {
             return LocalCommandResult(handled = false, reason = "Empty input")
         }
 
-        val normalized = normalizeText(trimmed)
+        val normalized = com.example.brain.TextNormalizer.normalize(trimmed)
 
         // 1. User Feedback & Failure Reporting ("nahi hua", "ye nahi hua", "fail hua", etc.)
         // Must be checked FIRST before any action or search intent!
@@ -247,10 +247,11 @@ class LocalCommandParser {
             "nahi mera matlab", "mera matlab ye tha", "mera matlab kuch aur tha", "mera matlab ye nahi tha",
             "mera matlab", "maine search karne ko nahi kaha tha", "maine search karne ko nahi bola tha",
             "maine search nahi bola tha", "maine search karne ko nahi bola",
+            "maine ye nahi bola", "maine yeh nahi bola", "maine ye nahi bola tha", "maine yeh nahi bola tha",
             "ye nahi kaha tha", "ye nahi bola tha", "maine yeh nahi kah raha tha",
             "main yeh nahi kah raha tha", "galat hai", "ye galat hai", "wrong hai",
             "tum galat samjhe", "tumne galat samjha", "aisa nahi", "ऐसा नहीं",
-            "galat interpret kiya", "maine aisa nahi bola tha"
+            "ye mat karo", "aisa mat karo", "galat interpret kiya", "maine aisa nahi bola tha"
         )
         if (correctionPhrases.any { normalized.contains(it) }) {
             return LocalCommandResult(
@@ -770,9 +771,11 @@ class LocalCommandParser {
         if (!hasChrome) return null
 
         var query = original
+        query = query.replace(Regex("(?i)\\b(in|on|par|pe|mein|me|में|पर)\\s+(google\\s+chrome|chrome|browser)\\b"), " ")
         query = query.replace(Regex("(?i)\\b(google\\s+chrome|chrome|browser)\\s*(mein|me|par|pe|in|on|पर|में)?\\b"), " ")
         query = query.replace(Regex("(?i)\\s*(kholo|open\\s*(karo|kro)?|open|chalao|dhoondho|khojo|search\\s*(karo|kro)?|सर्च\\s*करो|खोलो|सर्च)\\s*$"), " ")
         query = query.replace(Regex("(?i)^\\s*(kholo|open|search\\s*(for)?)\\s*"), " ")
+        query = query.replace(Regex("(?i)\\b(in|on|par|pe|mein|me)\\s*$"), " ")
         query = query.replace(Regex("\\s+"), " ").trim()
 
         if (query.isBlank()) {
@@ -884,7 +887,7 @@ class LocalCommandParser {
 
     private fun stripLaunchAndPoliteness(normalized: String, appName: String): String {
         return normalized.replace(appName, "")
-            .replace(Regex("(?i)\\b(mujhe|kripya|please|zara|ek baar|app|kholo|chalao|open|launch|start|chala do|khol do|kholkar do|khol ke do|open karo|start karo|chala|do|ko|खोलो|चलाओ|खोल दो|चला दो|शुरू करो|चला|दो|कर|के|दीजिये|दीजिए)\\b"), " ")
+            .replace(Regex("(?i)\\b(mujhe|kripya|please|zara|ek baar|app|kholo|chalao|open|launch|start|chala do|khol do|kholkar do|khol kar do|khol ke do|khol kar|kholkar|khol|open karo|start karo|chala|kar|do|ko|खोलो|चलाओ|खोल दो|चला दो|शुरू करो|चला|दो|कर|के|दीजिये|दीजिए)\\b"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
     }
