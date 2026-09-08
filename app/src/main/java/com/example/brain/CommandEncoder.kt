@@ -39,6 +39,10 @@ object CommandEncoder {
 
         // Single-command encoding based on classified IntentType
         return when (classification.intent) {
+            IntentType.API_KEY_STATUS_QUERY -> encodeApiKeyStatusQuery(rawText, normalizedText, classification)
+            IntentType.CONTEXT_QUERY -> encodeContextQuery(rawText, normalizedText, classification)
+            IntentType.WHY_QUERY -> encodeWhyQuery(rawText, normalizedText, classification)
+            IntentType.META_CONVERSATION -> encodeMetaConversation(rawText, normalizedText, classification)
             IntentType.SEARCH_AND_PLAY -> encodeSearchAndPlay(rawText, normalizedText, classification)
             IntentType.SEARCH -> encodeSearch(rawText, normalizedText, classification)
             IntentType.OPEN_APP -> encodeOpenApp(rawText, normalizedText, classification)
@@ -246,6 +250,69 @@ object CommandEncoder {
             category = MessageCategory.CONTEXT_QUESTION,
             confidence = 1.0f
             // CRITICAL: query is null! Never search!
+        )
+    }
+
+    private fun encodeApiKeyStatusQuery(
+        rawText: String,
+        normalizedText: String,
+        classification: IntentClassifier.ClassificationResult
+    ): ParsedCommand {
+        return ParsedCommand(
+            rawText = rawText,
+            normalizedText = normalizedText,
+            intent = IntentType.API_KEY_STATUS_QUERY,
+            action = "REPORT_API_KEY_STATUS",
+            category = MessageCategory.API_KEY_STATUS_QUERY,
+            confidence = 1.0f
+        )
+    }
+
+    private fun encodeContextQuery(
+        rawText: String,
+        normalizedText: String,
+        classification: IntentClassifier.ClassificationResult
+    ): ParsedCommand {
+        val target = classification.preference ?: "user_question"
+        return ParsedCommand(
+            rawText = rawText,
+            normalizedText = normalizedText,
+            intent = IntentType.CONTEXT_QUERY,
+            contextReference = classification.contextReference,
+            action = if (target == "assistant_response") "RECALL_ASSISTANT_MESSAGE" else "RECALL_USER_QUESTION",
+            category = MessageCategory.CONTEXT_QUESTION,
+            confidence = 1.0f
+        )
+    }
+
+    private fun encodeWhyQuery(
+        rawText: String,
+        normalizedText: String,
+        classification: IntentClassifier.ClassificationResult
+    ): ParsedCommand {
+        return ParsedCommand(
+            rawText = rawText,
+            normalizedText = normalizedText,
+            intent = IntentType.WHY_QUERY,
+            contextReference = classification.contextReference,
+            action = "EXPLAIN_PREVIOUS_EVENT",
+            category = MessageCategory.WHY_QUESTION,
+            confidence = 1.0f
+        )
+    }
+
+    private fun encodeMetaConversation(
+        rawText: String,
+        normalizedText: String,
+        classification: IntentClassifier.ClassificationResult
+    ): ParsedCommand {
+        return ParsedCommand(
+            rawText = rawText,
+            normalizedText = normalizedText,
+            intent = IntentType.META_CONVERSATION,
+            action = "RESPOND_META_CONVERSATION",
+            category = MessageCategory.META_CONVERSATION,
+            confidence = 1.0f
         )
     }
 

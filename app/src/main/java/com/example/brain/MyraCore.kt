@@ -8,8 +8,10 @@ import com.example.data.MemoryRepository
 import com.example.models.ActionResult
 import com.example.models.ActionStep
 import com.example.models.DecisionSource
+import com.example.models.DetailedExecutionResult
 import com.example.models.DiagnosticLog
 import com.example.models.ExecutionDecision
+import com.example.models.ExecutionStatus
 import com.example.models.InstalledAppInfo
 import com.example.models.IntentType
 import com.example.models.MessageCategory
@@ -59,7 +61,7 @@ class MyraCore(
     private val learningEngine = LearningEngine(memoryRepository, confidenceEngine)
 
     val resultReporter = ResultReporter()
-    val responseEngine = MyraResponseEngine(resultReporter)
+    val responseEngine = MyraResponseEngine(resultReporter, apiKeyStatusProvider = { geminiService.getApiKeyStatus() })
     val conversationContext = ConversationContext()
     val recentRequestContext = RecentRequestContext(resultReporter)
 
@@ -99,11 +101,15 @@ class MyraCore(
 
         val normalized = localCommandParser.normalizeText(rawQuery)
 
+        // 0. Record user message to conversation history BEFORE anything else
+        conversationContext.recordUserMessage(rawQuery, normalized)
+
         // 1. Anti-loop protection
         val previousFailures = commandFailureTracker[normalized] ?: 0
         if (previousFailures >= MAX_LOOP_RETRIES) {
             logDiagnostic("ANTI_LOOP", "Detected repeated failure ($previousFailures times) for command: '$normalized'. Halting loop.")
             val errorMsg = "मैंने यह एक्शन कई बार आज़माया लेकिन पूरा नहीं हो सका। कृपया स्क्रीन या परमिशन चेक करें।"
+            conversationContext.recordAssistantResponse(errorMsg, intent = IntentType.UNKNOWN, relatedRequestId = requestId)
             return ExecutionResult(
                 replyText = errorMsg,
                 intent = ParsedIntent(type = IntentType.UNKNOWN),
@@ -120,8 +126,71 @@ class MyraCore(
 
             // 3. Local Context Questions & Direct Non-Action Intents
             when (decision.intent.type) {
-                IntentType.RECALL_RECENT_REQUESTS, IntentType.RECALL_RECENT_REQUEST -> {
-                    val recallReply = recentRequestContext.formatRecallMessage()
+                IntentType.API_KEY_STATUS_QUERY -> {
+                    val status = geminiService.getApiKeyStatus()
+                    val reply = responseEngine.generateApiKeyStatusResponse(status)
+                    conversationContext.recordAssistantTurn(reply, MessageCategory.API_KEY_STATUS_QUERY)
+                    conversationContext.recordAssistantResponse(reply, intent = IntentType.API_KEY_STATUS_QUERY, relatedRequestId = requestId)
+                    logDiagnostic("API_KEY_STATUS", "Reporting status: $reply")
+                    return ExecutionResult(
+                        replyText = reply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = reply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.CONTEXT_QUERY -> {
+                    val reply = if (decision.intent.executionPreference == "assistant_response") {
+                        conversationContext.formatPreviousAssistantMessageResponse()
+                    } else {
+                        conversationContext.formatPreviousUserQuestionResponse()
+                    }
+                    conversationContext.recordAssistantTurn(reply, MessageCategory.CONTEXT_QUESTION)
+                    conversationContext.recordAssistantResponse(reply, intent = IntentType.CONTEXT_QUERY, relatedRequestId = requestId)
+                    logDiagnostic("CONTEXT_QUERY", "Answering context query: $reply")
+                    return ExecutionResult(
+                        replyText = reply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = reply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.WHY_QUERY -> {
+                    val reply = responseEngine.generateWhyResponse(conversationContext, recentRequestContext)
+                    conversationContext.recordAssistantTurn(reply, MessageCategory.WHY_QUESTION)
+                    conversationContext.recordAssistantResponse(reply, intent = IntentType.WHY_QUERY, relatedRequestId = requestId)
+                    logDiagnostic("WHY_QUERY", "Answering why query: $reply")
+                    return ExecutionResult(
+                        replyText = reply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = reply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.META_CONVERSATION -> {
+                    val reply = responseEngine.generateMetaConversationResponse(conversationContext)
+                    conversationContext.recordAssistantTurn(reply, MessageCategory.META_CONVERSATION)
+                    conversationContext.recordAssistantResponse(reply, intent = IntentType.META_CONVERSATION, relatedRequestId = requestId)
+                    logDiagnostic("META_CONVERSATION", "Answering meta conversation: $reply")
+                    return ExecutionResult(
+                        replyText = reply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = reply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.RECALL_REQUEST, IntentType.RECALL_RECENT_REQUESTS, IntentType.RECALL_RECENT_REQUEST -> {
+                    val recallReply = if (decision.intent.type == IntentType.RECALL_REQUEST) {
+                        conversationContext.formatPreviousUserMessageResponse()
+                    } else {
+                        recentRequestContext.formatRecallMessage()
+                    }
+                    conversationContext.recordAssistantTurn(recallReply, MessageCategory.CONTEXT_QUESTION)
+                    conversationContext.recordAssistantResponse(recallReply, intent = decision.intent.type, relatedRequestId = requestId)
                     logDiagnostic("CONTEXT_QUERY", "Answering recall query: $recallReply")
                     return ExecutionResult(
                         replyText = recallReply,
@@ -131,12 +200,14 @@ class MyraCore(
                         confidence = 1.0f
                     )
                 }
-                IntentType.REPORT_LAST_EXECUTION -> {
+                IntentType.EXECUTION_STATUS_QUERY, IntentType.REPORT_LAST_EXECUTION -> {
                     val reportReply = if (decision.intent.targetIndex != null) {
                         recentRequestContext.formatExecutionReportForIndex(decision.intent.targetIndex)
                     } else {
                         recentRequestContext.formatLastExecutionReport()
                     }
+                    conversationContext.recordAssistantTurn(reportReply, MessageCategory.EXECUTION_STATUS)
+                    conversationContext.recordAssistantResponse(reportReply, intent = decision.intent.type, relatedRequestId = requestId)
                     logDiagnostic("CONTEXT_QUERY", "Answering status report: $reportReply")
                     return ExecutionResult(
                         replyText = reportReply,
@@ -148,6 +219,8 @@ class MyraCore(
                 }
                 IntentType.EXPLAIN_LAST_FAILURE -> {
                     val explainReply = recentRequestContext.formatLastFailureExplanation()
+                    conversationContext.recordAssistantTurn(explainReply, MessageCategory.EXECUTION_STATUS)
+                    conversationContext.recordAssistantResponse(explainReply, intent = decision.intent.type, relatedRequestId = requestId)
                     logDiagnostic("CONTEXT_QUERY", "Answering failure explanation: $explainReply")
                     return ExecutionResult(
                         replyText = explainReply,
@@ -164,6 +237,8 @@ class MyraCore(
                         return executeUserQuery(lastReq.rawUserCommand, installedApps, recentConversationContext)
                     } else {
                         val noCmdMsg = "दोहराने के लिए कोई पिछला एक्शन नहीं मिला।"
+                        conversationContext.recordAssistantTurn(noCmdMsg, MessageCategory.RETRY_REQUEST)
+                        conversationContext.recordAssistantResponse(noCmdMsg, intent = decision.intent.type, relatedRequestId = requestId)
                         return ExecutionResult(
                             replyText = noCmdMsg,
                             intent = decision.intent,
@@ -185,6 +260,8 @@ class MyraCore(
                         )
                     }
                     val feedbackReply = resultReporter.formatFailureFeedbackResponse(lastReq?.rawUserCommand)
+                    conversationContext.recordAssistantTurn(feedbackReply, MessageCategory.FAILURE_FEEDBACK)
+                    conversationContext.recordAssistantResponse(feedbackReply, intent = decision.intent.type, relatedRequestId = requestId)
                     return ExecutionResult(
                         replyText = feedbackReply,
                         intent = decision.intent,
@@ -206,6 +283,8 @@ class MyraCore(
                         )
                     }
                     val corrReply = resultReporter.formatCorrectionResponse(correctionText)
+                    conversationContext.recordAssistantTurn(corrReply, MessageCategory.CORRECTION)
+                    conversationContext.recordAssistantResponse(corrReply, intent = decision.intent.type, relatedRequestId = requestId)
                     return ExecutionResult(
                         replyText = corrReply,
                         intent = decision.intent,
@@ -218,6 +297,8 @@ class MyraCore(
                     val prefKey = decision.intent.executionPreference ?: "PERFORM_STEPS_AUTOMATICALLY"
                     memoryRepository.setAssistantPreference(prefKey, "true")
                     val metaReply = resultReporter.formatMetaInstructionResponse(decision.intent.metaInstruction)
+                    conversationContext.recordAssistantTurn(metaReply, MessageCategory.META_INSTRUCTION)
+                    conversationContext.recordAssistantResponse(metaReply, intent = decision.intent.type, relatedRequestId = requestId)
                     recentRequestContext.recordNewRequest(
                         requestId = requestId,
                         rawCommand = rawQuery,
@@ -250,7 +331,7 @@ class MyraCore(
                     return executeChallengeWorkflow(requestId, rawQuery, normalized, decision.intent)
                 }
                 IntentType.GREETING, IntentType.GENERAL_CONVERSATION, IntentType.CONFIRMATION,
-                IntentType.DENIAL, IntentType.MEMORY_QUERY, IntentType.GENERAL_CHAT -> {
+                IntentType.DENIAL, IntentType.MEMORY_QUERY, IntentType.GENERAL_CHAT, IntentType.QUESTION -> {
                     val cat = decision.intent.category.takeIf { it != MessageCategory.UNKNOWN } ?: when (decision.intent.type) {
                         IntentType.GREETING -> MessageCategory.GREETING
                         IntentType.GENERAL_CONVERSATION -> MessageCategory.GENERAL_CONVERSATION
@@ -268,6 +349,7 @@ class MyraCore(
                     logDiagnostic("CONVERSATION", "Direct response for category $cat: ${generated.text}")
                     conversationContext.recordUserTurn(rawQuery, decision.intent, cat)
                     conversationContext.recordAssistantTurn(generated.text, cat)
+                    conversationContext.recordAssistantResponse(generated.text, intent = decision.intent.type, relatedRequestId = requestId)
                     return ExecutionResult(
                         replyText = generated.text,
                         intent = decision.intent,
@@ -385,6 +467,20 @@ class MyraCore(
                 isSearchOnlyStarted = isSearchOnly && result.success
             )
             conversationContext.recordAssistantTurn(finalReply, decision.intent.category)
+            conversationContext.recordAssistantResponse(finalReply, intent = decision.intent.type, relatedRequestId = requestId)
+            conversationContext.recordExecutionResult(
+                DetailedExecutionResult(
+                    requestId = requestId,
+                    userCommand = rawQuery,
+                    intent = decision.intent,
+                    target = decision.intent.app ?: decision.intent.target ?: decision.intent.query,
+                    currentState = finalState,
+                    verificationStatus = result.isVerified,
+                    finalStatus = if (result.success && result.isVerified) ExecutionStatus.SUCCESS else if (result.success) ExecutionStatus.PARTIAL_SUCCESS else ExecutionStatus.FAILED,
+                    summary = finalReply,
+                    failureReason = result.error
+                )
+            )
 
             logDiagnostic("VERIFIER", "Result state=$finalState, verified=${result.isVerified}: \"${finalReply.take(40)}\"")
 

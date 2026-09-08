@@ -97,7 +97,7 @@ class RecentRequestContext(
         intent: ParsedIntent,
         targetApp: String?,
         query: String?,
-        plannedActions: List<String>,
+        plannedActions: List<String> = emptyList(),
         tasks: List<RecordedTask> = emptyList(),
         metaInstruction: String? = null
     ): RecordedRequest {
@@ -184,6 +184,10 @@ class RecentRequestContext(
 
     fun getLastRequest(): RecordedRequest? {
         return history.lastOrNull()
+    }
+
+    fun getLastFailedRequest(): RecordedRequest? {
+        return history.findLast { it.currentState == RequestState.FAILED || it.currentState == RequestState.PARTIAL_SUCCESS }
     }
 
     fun getRecentRequests(count: Int = 5): List<RecordedRequest> {

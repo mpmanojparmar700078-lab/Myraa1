@@ -39,7 +39,38 @@ object IntentClassifier {
             )
         }
 
-        // 2. Correction
+        // 2. API Key Status Query (MUST NEVER BECOME SEARCH OR GENERIC)
+        // Example: "api key lgi ya nhi", "api key lagi hai?", "gemini key configured hai?"
+        if (isApiKeyStatusQuery(normalized)) {
+            return ClassificationResult(
+                intent = IntentType.API_KEY_STATUS_QUERY,
+                category = MessageCategory.API_KEY_STATUS_QUERY,
+                confidence = 1.0f
+            )
+        }
+
+        // 3. Meta Conversation / Dialogue Alignment
+        // Example: "me kya bol rha hu or tum kya bol rhe ho"
+        if (isMetaConversation(normalized)) {
+            return ClassificationResult(
+                intent = IntentType.META_CONVERSATION,
+                category = MessageCategory.META_CONVERSATION,
+                confidence = 1.0f
+            )
+        }
+
+        // 4. Why Query / Explanation of previous statement or action
+        // Example: "kyo", "kyu", "why?", "aisa kyu?"
+        if (isWhyQuery(normalized)) {
+            return ClassificationResult(
+                intent = IntentType.WHY_QUERY,
+                category = MessageCategory.WHY_QUESTION,
+                confidence = 1.0f,
+                contextReference = contextRef
+            )
+        }
+
+        // 5. Correction
         // Example: "nahi mera matlab...", "maine search karne ko nahi kaha tha", "maine ye nahi bola", "ye nahi bola tha"
         if (isCorrection(normalized)) {
             return ClassificationResult(
@@ -50,7 +81,7 @@ object IntentClassifier {
             )
         }
 
-        // 3. Execution Status Queries & Failure Explanations
+        // 6. Execution Status Queries & Failure Explanations
         // Example: "1 wale me tumne kya kiya", "tumne kya kiya", "kyu nahi hua"
         if (isExecutionStatusQuery(normalized)) {
             val intent = if (isWhyFailureQuery(normalized)) {
@@ -66,7 +97,7 @@ object IntentClassifier {
             )
         }
 
-        // 4. Failure Feedback
+        // 7. Failure Feedback
         // Example: "nahi hua", "nahi hua or youtube par video play bhi nhi hua tha", "kuch nahi hua"
         // MUST NEVER BE TREATED AS SEARCH!
         if (isFailureFeedback(normalized)) {
@@ -78,8 +109,19 @@ object IntentClassifier {
             )
         }
 
-        // 5. Context / Recall Queries
-        // Example: "mene kya bola", "maine kya kaha tha", "what did i say"
+        // 8. Context Query ("mene kya pucha" -> previous user question/message)
+        if (isContextQuery(normalized)) {
+            val isAssistantRecall = normalized.contains("tumne kya")
+            return ClassificationResult(
+                intent = IntentType.CONTEXT_QUERY,
+                category = MessageCategory.CONTEXT_QUESTION,
+                confidence = 1.0f,
+                contextReference = contextRef,
+                preference = if (isAssistantRecall) "assistant_response" else "user_question"
+            )
+        }
+
+        // 9. Recall Requests ("mene kya bola tha" -> previous user request/command)
         if (isRecallQuery(normalized)) {
             return ClassificationResult(
                 intent = IntentType.RECALL_REQUEST,
@@ -89,7 +131,7 @@ object IntentClassifier {
             )
         }
 
-        // 6. Retry Request
+        // 10. Retry Request
         // Example: "dobara karo", "phir se karo", "repeat karo", "usi ko dobara karo"
         if (isRetryRequest(normalized)) {
             return ClassificationResult(
@@ -100,7 +142,7 @@ object IntentClassifier {
             )
         }
 
-        // 7. Cancel Request
+        // 11. Cancel Request
         // Example: "cancel karo", "ruk jao", "rok do", "stop"
         if (isCancelRequest(normalized)) {
             return ClassificationResult(
@@ -252,12 +294,75 @@ object IntentClassifier {
         return failurePhrases.any { normalized.contains(it) }
     }
 
+    private fun isApiKeyStatusQuery(normalized: String): Boolean {
+        val hasKeyWord = normalized.contains("api key") ||
+                normalized.contains("apikey") ||
+                normalized.contains("api ki") ||
+                normalized.contains("gemini key") ||
+                normalized.contains("gemini api") ||
+                (normalized.contains("key") && (normalized.contains("gemini") || normalized.contains("api") || normalized.contains("status")))
+        val statusWords = listOf(
+            "lgi ya nhi", "lagi ya nahi", "lagi hai", "lgi hai", "lagi h", "lgi h",
+            "status", "configured", "set hai", "hai ya nahi", "hai ya nhi", "dali hai",
+            "daali hai", "save hai", "check", "batao", "hai", "लगी है", "लगी या नहीं", "स्टेटस", "सेट है"
+        )
+        val directKeyPhrases = listOf(
+            "api key lgi ya nhi", "api key lagi ya nahi", "api key lagi hai", "api key lgi hai",
+            "api key status", "api key status kya hai", "api key ka status", "api key ka status kya hai",
+            "gemini key configured hai", "key set hai ya nahi", "key set hai ya nhi", "gemini key lagi hai",
+            "key lagi hai ya nahi", "api key lagi hai ya nahi", "api key lagi hai?", "api key lgi hai?",
+            "api key lgi ya nahi", "api key lagi ya nhi"
+        )
+        return directKeyPhrases.any { normalized.contains(it) } || (hasKeyWord && statusWords.any { normalized.contains(it) })
+    }
+
+    private fun isMetaConversation(normalized: String): Boolean {
+        val metaConvPhrases = listOf(
+            "me kya bol rha hu or tum kya bol rhe ho",
+            "me kya bol raha hu or tum kya bol rahe ho",
+            "me kya bol raha hu aur tum kya bol rahe ho",
+            "main kya bol raha hu aur tum kya bol rahe ho",
+            "mai kya bol raha hu aur tum kya bol rahe ho",
+            "me kya bol rha hu aur tum kya bol rhe ho",
+            "hum kya baat kar rahe", "hum kya baat kar rahe the",
+            "tum kya bol rahe ho", "kya bol rahe ho tum", "tum kya bol rahi ho",
+            "kya bol rhe ho", "tum kya bol rhe ho",
+            "me kya bol raha hu", "me kya bol rha hu", "mai kya bol raha hu",
+            "me kya pooch raha hu", "me kya puch raha hu"
+        )
+        return metaConvPhrases.any { normalized.contains(it) }
+    }
+
+    private fun isWhyQuery(normalized: String): Boolean {
+        val cleaned = normalized.trim().removeSuffix("?").removeSuffix("!").removeSuffix("।").trim()
+        val whyExact = setOf(
+            "kyo", "kyu", "kyun", "why", "aisa kyu", "aisa kyo", "aisa kyun",
+            "fir kyu", "fir kyo", "phir kyu", "phir kyo", "ye kyu", "ye kyo", "yeh kyu",
+            "yeh kyo", "aisa kyu hua", "kyu aisa", "क्यों", "ऐसा क्यों", "फिर क्यों",
+            "यह क्यों", "ये क्यों"
+        )
+        return whyExact.contains(cleaned) ||
+                normalized.matches(Regex("(?i)^(kyo|kyu|kyun|why|aisa kyu|fir kyu|ye kyu|phir kyu|yeh kyu)[?!.]*$"))
+    }
+
+    private fun isContextQuery(normalized: String): Boolean {
+        val contextPhrases = listOf(
+            "mene kya pucha", "maine kya pucha", "mene kya poocha", "maine kya poocha",
+            "mene kya pucha tha", "maine kya pucha tha", "mene kya poocha tha", "maine kya poocha tha",
+            "what did i ask", "what did i ask you", "मैंने क्या पूछा", "मैंने क्या पूछा था",
+            "tumne kya bola", "tumne kya kaha", "tumne kya bola tha", "tumne kya kaha tha",
+            "what did you say", "तुमने क्या बोला", "तुमने क्या कहा"
+        )
+        return contextPhrases.any { normalized.contains(it) }
+    }
+
     private fun isRecallQuery(normalized: String): Boolean {
+        if (isContextQuery(normalized)) return false
         val recallPhrases = listOf(
-            "mene kya bola", "maine kya bola", "maine kya kaha tha", "mene kya bola tha",
-            "maine kya bola tha", "mene kya karne ko bola", "maine kya karne ko bola",
-            "what did i ask you to do", "what did i say", "what was my last command",
-            "मैंने क्या बोला था", "मैंने क्या करने को बोला", "maine kya pucha", "mene kya pucha"
+            "mene kya bola tha", "maine kya bola tha", "mene kya bola", "maine kya bola",
+            "maine kya kaha tha", "mene kya kaha tha", "mene kya karne ko bola", "maine kya karne ko bola",
+            "what did i say", "what was my last message", "what was my last command",
+            "मैंने क्या बोला था", "मैंने क्या कहा था", "मैंने क्या करने को बोला"
         )
         return recallPhrases.any { normalized.contains(it) } ||
                 normalized.matches(Regex("(?i)^(mene|maine|hamne|मैंने)\\s+(kya|tumhe\\s+kya).*"))

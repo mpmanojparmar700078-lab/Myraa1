@@ -1,5 +1,6 @@
 package com.example.brain
 
+import com.example.models.ApiKeyStatus
 import com.example.models.DetailedExecutionResult
 import com.example.models.ExecutionStatus
 import com.example.models.ExecutionStep
@@ -22,7 +23,8 @@ import com.example.models.ResponseType
  * into single, consistent, truth-anchored user responses.
  */
 class MyraResponseEngine(
-    private val resultReporter: ResultReporter = ResultReporter()
+    private val resultReporter: ResultReporter = ResultReporter(),
+    val apiKeyStatusProvider: (() -> ApiKeyStatus)? = null
 ) {
 
     fun generateResponse(
@@ -37,6 +39,28 @@ class MyraResponseEngine(
             MessageCategory.GREETING -> generateGreetingResponse(requestId)
             MessageCategory.GENERAL_CONVERSATION -> generateConversationResponse(intent, requestId)
             MessageCategory.QUESTION -> generateQuestionResponse(intent, requestId)
+            MessageCategory.API_KEY_STATUS_QUERY -> {
+                val status = apiKeyStatusProvider?.invoke() ?: ApiKeyStatus.NOT_CONFIGURED
+                GeneratedResponse(
+                    text = generateApiKeyStatusResponse(status),
+                    responseType = ResponseType.API_KEY_REPORT,
+                    requestId = requestId
+                )
+            }
+            MessageCategory.WHY_QUESTION -> {
+                GeneratedResponse(
+                    text = generateWhyResponse(context, context.recentRequestContext),
+                    responseType = ResponseType.CONVERSATION,
+                    requestId = requestId
+                )
+            }
+            MessageCategory.META_CONVERSATION -> {
+                GeneratedResponse(
+                    text = generateMetaConversationResponse(context),
+                    responseType = ResponseType.CONVERSATION,
+                    requestId = requestId
+                )
+            }
             MessageCategory.CONTEXT_QUESTION -> generateContextReportResponse(intent, context, requestId)
             MessageCategory.EXECUTION_STATUS -> generateExecutionReportResponse(intent, context, executionResult, requestId)
             MessageCategory.FAILURE_FEEDBACK -> generateFailureFeedbackResponse(context, requestId)
@@ -101,11 +125,14 @@ class MyraResponseEngine(
     }
 
     private fun generateQuestionResponse(intent: ParsedIntent, requestId: Long): GeneratedResponse {
-        val query = intent.query?.lowercase() ?: ""
-        val text = if (query.contains("who are you") || query.contains("kaun ho") || query.contains("कौन हो")) {
-            "मैं Myra हूँ, आपकी स्मार्ट पर्सनल AI असिस्टेंट। मैं आपके फ़ोन पर ऐप्स खोलने, वीडियो चलाने और विभिन्न कार्य करने में मदद कर सकती हूँ।"
-        } else {
-            "मैं आपकी डिवाइस पर ऐप्स खोलने, सर्च करने और टास्क ऑटोमेट करने में मदद कर सकती हूँ। बताइए क्या करूँ?"
+        val query = intent.query?.lowercase() ?: intent.responseText?.lowercase() ?: ""
+        val text = when {
+            query.contains("who are you") || query.contains("kaun ho") || query.contains("कौन हो") || query.contains("naam kya") ->
+                "मैं Myra हूँ, आपकी स्मार्ट पर्सनल AI असिस्टेंट। मैं आपके फ़ोन पर ऐप्स खोलने, वीडियो चलाने और विभिन्न कार्य करने में मदद कर सकती हूँ।"
+            query.contains("kya kar sakti ho") || query.contains("what can you do") || query.contains("kya karti ho") ->
+                "मैं आपकी डिवाइस पर ऐप्स खोलने, सर्च करने और टास्क ऑटोमेट करने में मदद कर सकती हूँ। बताइए क्या करूँ?"
+            else ->
+                "मैं इसे सही तरह समझ नहीं पाई। क्या आप अपने पिछले सवाल के बारे में पूछ रहे हैं, या कोई नया काम करना चाहते हैं?"
         }
         return GeneratedResponse(
             text = text,
@@ -119,12 +146,90 @@ class MyraResponseEngine(
         context: ConversationContext,
         requestId: Long
     ): GeneratedResponse {
-        val report = context.formatRecallMessage()
+        val report = when (intent.type) {
+            IntentType.CONTEXT_QUERY -> {
+                if (intent.executionPreference == "assistant_response") {
+                    context.formatPreviousAssistantMessageResponse()
+                } else {
+                    context.formatPreviousUserQuestionResponse()
+                }
+            }
+            IntentType.RECALL_REQUEST -> {
+                context.formatPreviousUserMessageResponse()
+            }
+            else -> {
+                context.formatRecallMessage()
+            }
+        }
         return GeneratedResponse(
             text = report,
             responseType = ResponseType.CONTEXT_REPORT,
             requestId = requestId
         )
+    }
+
+    fun generateApiKeyStatusResponse(status: ApiKeyStatus): String {
+        return when (status) {
+            ApiKeyStatus.CONFIGURED -> "हाँ, API key configured है।"
+            ApiKeyStatus.NOT_CONFIGURED -> "नहीं, API key configured नहीं है।"
+            ApiKeyStatus.INVALID -> "API key अमान्य (invalid) है।"
+            ApiKeyStatus.UNKNOWN -> "मैं अभी API key की configuration स्थिति verify नहीं कर पा रही हूँ।"
+        }
+    }
+
+    fun generateWhyResponse(
+        context: ConversationContext,
+        recentRequestContext: RecentRequestContext? = null
+    ): String {
+        val lastAssistantMsg = context.getPreviousAssistantMessage()
+        val lastAssistantText = lastAssistantMsg?.rawText ?: ""
+        val lastFail = context.lastFailure ?: recentRequestContext?.getLastFailedRequest()
+
+        // 1. If previous assistant response was about API key:
+        if (lastAssistantText.contains("API key", ignoreCase = true) || lastAssistantMsg?.intent == IntentType.API_KEY_STATUS_QUERY) {
+            val status = apiKeyStatusProvider?.invoke() ?: ApiKeyStatus.NOT_CONFIGURED
+            return when (status) {
+                ApiKeyStatus.NOT_CONFIGURED -> "क्योंकि सेटिंग्स में कोई Gemini API key दर्ज नहीं की गई है, इसलिए Myra ऑफ़लाइन/लोकल मोड में काम कर रही है।"
+                ApiKeyStatus.CONFIGURED -> "क्योंकि API key कॉन्फ़िगर है और सिस्टम क्लाउड मॉडल से कनेक्ट होने के लिए तैयार है।"
+                ApiKeyStatus.INVALID -> "क्योंकि दर्ज की गई API key मान्य नहीं पाई गई।"
+                ApiKeyStatus.UNKNOWN -> "क्योंकि API key की स्थिति की पुष्टि नहीं हो सकी।"
+            }
+        }
+
+        // 2. If previous assistant response was about context recall (e.g. "आपने अभी पूछा था..."):
+        if (lastAssistantText.contains("आपने अभी पूछा था") || lastAssistantText.contains("आपने अभी बोला था") || lastAssistantMsg?.intent == IntentType.CONTEXT_QUERY) {
+            return "क्योंकि आपने मुझसे पूछा था कि आपने पहले क्या कहा या पूछा था, इसलिए मैंने बातचीत के इतिहास से उसे दोहराया।"
+        }
+
+        // 3. If previous request or action failed:
+        if (lastFail != null) {
+            val reason = if (lastFail is DetailedExecutionResult) {
+                lastFail.failureReason ?: lastFail.summary
+            } else {
+                recentRequestContext?.formatLastFailureExplanation() ?: "पिछला एक्शन पूरा नहीं हुआ"
+            }
+            return "क्योंकि पिछला काम पूरा नहीं हो सका: $reason"
+        }
+
+        // 4. If previous action was successful:
+        val lastReq = context.getLastRequest()
+        if (lastReq != null && (lastReq.currentState == RequestState.SUCCESS || lastReq.currentState == RequestState.REQUEST_SUCCEEDED)) {
+            return "क्योंकि पिछला अनुरोध (\"${lastReq.rawUserCommand}\") सफलतापूर्वक पूरा हो गया था।"
+        }
+
+        // 5. Context-aware fallback - never generic capabilities!
+        return "मैं आपके पिछले सवाल के जवाब के संबंध में बता रही थी। क्या आप किसी खास बात या स्टेप की वजह जानना चाहते हैं?"
+    }
+
+    fun generateMetaConversationResponse(context: ConversationContext): String {
+        val lastUser = context.getPreviousUserQuestion(skipLast = true) ?: context.getPreviousUserMessage(skipLast = true)
+        val lastAssistant = context.getPreviousAssistantMessage()
+
+        val details = if (lastUser != null && lastAssistant != null) {
+            " आपने पूछा था: \"${lastUser.rawText}\" और मेरा जवाब था: \"${lastAssistant.rawText}\"।"
+        } else ""
+
+        return "आप मुझसे पूछ रहे हैं कि आप क्या कह रहे हैं और मैं उसके जवाब में क्या कह रही हूँ। अभी आपने मेरी प्रतिक्रिया पर सवाल किया है क्योंकि आपको लग रहा है कि मेरा जवाब आपके सवाल से मेल नहीं खा रहा।$details बताइए, मैं इसे आपके लिए कैसे स्पष्ट करूँ?"
     }
 
     private fun generateExecutionReportResponse(

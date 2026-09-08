@@ -1,8 +1,10 @@
 package com.example.brain
 
+import com.example.models.ConversationMessage
 import com.example.models.DetailedExecutionResult
 import com.example.models.ExecutionStatus
 import com.example.models.IntentType
+import com.example.models.MessageRole
 import com.example.models.ParsedIntent
 import com.example.models.PendingConfirmation
 import com.example.models.PendingConfirmationType
@@ -12,22 +14,19 @@ import java.util.concurrent.ConcurrentLinkedDeque
 
 /**
  * ConversationContext maintains short-term dialogue context:
- * - lastUserMessage
- * - lastAssistantMessage
- * - currentRequest
- * - lastRequest
- * - recentRequests
- * - lastExecutionResult
- * - lastFailure
- * - pendingConfirmation
- * - pendingClarification
+ * - conversationHistory: Complete record of ALL user and assistant messages (chat, questions, commands)
+ * - recentRequestContext: Commands & executable action history ONLY
+ * - executionHistory: Actual execution attempts and results
  *
- * This provides the memory and state needed to interpret short follow-ups,
- * confirmations ("haan"), denials ("nahi"), retries, and context questions.
+ * This separation is mandatory so questions like "mene kya pucha" search
+ * ConversationHistory instead of Command History.
  */
 class ConversationContext(
     val recentRequestContext: RecentRequestContext = RecentRequestContext()
 ) {
+    val conversationHistory = ConcurrentLinkedDeque<ConversationMessage>()
+    val executionHistory = ConcurrentLinkedDeque<DetailedExecutionResult>()
+
     var lastUserMessage: String? = null
         private set
 
@@ -49,24 +48,66 @@ class ConversationContext(
     var pendingClarification: String? = null
         private set
 
-    fun recordUserMessage(message: String) {
+    fun recordUserMessage(
+        message: String,
+        normalized: String = TextNormalizer.normalize(message),
+        intent: IntentType = IntentType.UNKNOWN
+    ): ConversationMessage {
         lastUserMessage = message
+        val convMsg = ConversationMessage(
+            role = MessageRole.USER,
+            rawText = message,
+            normalizedText = normalized,
+            intent = intent
+        )
+        conversationHistory.addLast(convMsg)
+        while (conversationHistory.size > 50) {
+            conversationHistory.removeFirst()
+        }
+        return convMsg
     }
 
     fun recordUserTurn(message: String, intent: ParsedIntent? = null, category: com.example.models.MessageCategory? = null) {
         lastUserMessage = message
+        val normalized = TextNormalizer.normalize(message)
+        val intType = intent?.type ?: IntentType.UNKNOWN
+        val convMsg = ConversationMessage(
+            role = MessageRole.USER,
+            rawText = message,
+            normalizedText = normalized,
+            intent = intType
+        )
+        conversationHistory.addLast(convMsg)
+        while (conversationHistory.size > 50) {
+            conversationHistory.removeFirst()
+        }
     }
 
-    fun recordAssistantResponse(text: String, confirmation: PendingConfirmation? = null) {
+    fun recordAssistantResponse(
+        text: String,
+        confirmation: PendingConfirmation? = null,
+        intent: IntentType = IntentType.UNKNOWN,
+        relatedRequestId: Long? = null
+    ): ConversationMessage {
         lastAssistantMessage = text
         pendingConfirmation = confirmation
+        val convMsg = ConversationMessage(
+            role = MessageRole.ASSISTANT,
+            rawText = text,
+            normalizedText = text,
+            intent = intent,
+            response = text,
+            relatedRequestId = relatedRequestId
+        )
+        conversationHistory.addLast(convMsg)
+        while (conversationHistory.size > 50) {
+            conversationHistory.removeFirst()
+        }
+        return convMsg
     }
 
     fun recordAssistantTurn(text: String, category: com.example.models.MessageCategory? = null, confirmation: PendingConfirmation? = null) {
-        lastAssistantMessage = text
-        if (confirmation != null) {
-            pendingConfirmation = confirmation
-        }
+        recordAssistantResponse(text = text, confirmation = confirmation)
     }
 
     fun setPendingConfirmation(confirmation: PendingConfirmation?) {
@@ -131,12 +172,89 @@ class ConversationContext(
 
     fun recordExecutionResult(detailedResult: DetailedExecutionResult) {
         lastExecutionResult = detailedResult
+        executionHistory.addLast(detailedResult)
+        while (executionHistory.size > 30) {
+            executionHistory.removeFirst()
+        }
         if (detailedResult.finalStatus == ExecutionStatus.FAILED ||
             detailedResult.finalStatus == ExecutionStatus.PARTIAL_SUCCESS ||
             detailedResult.currentState == RequestState.FAILED ||
             detailedResult.currentState == RequestState.PARTIAL_SUCCESS
         ) {
             lastFailure = detailedResult
+        }
+    }
+
+    /**
+     * Retrieves previous user message from ConversationHistory.
+     * When current user message has already been recorded, skipLast=true skips it.
+     */
+    fun getPreviousUserMessage(skipLast: Boolean = true): ConversationMessage? {
+        val userMessages = conversationHistory.filter { it.role == MessageRole.USER }
+        return if (skipLast) {
+            if (userMessages.size >= 2) userMessages[userMessages.size - 2] else null
+        } else {
+            userMessages.lastOrNull()
+        }
+    }
+
+    /**
+     * Retrieves the latest previous user question.
+     * Prioritizes messages with question marks, question words, or question intents.
+     */
+    fun getPreviousUserQuestion(skipLast: Boolean = true): ConversationMessage? {
+        val userMessages = conversationHistory.filter { it.role == MessageRole.USER }
+        val pool = if (skipLast && userMessages.isNotEmpty()) userMessages.dropLast(1) else userMessages
+        return pool.findLast { msg ->
+            isQuestion(msg.rawText) ||
+            msg.intent == IntentType.QUESTION ||
+            msg.intent == IntentType.API_KEY_STATUS_QUERY ||
+            msg.intent == IntentType.CONTEXT_QUERY ||
+            msg.intent == IntentType.WHY_QUERY ||
+            msg.intent == IntentType.EXECUTION_STATUS_QUERY
+        } ?: pool.lastOrNull()
+    }
+
+    fun getPreviousAssistantMessage(): ConversationMessage? {
+        return conversationHistory.filter { it.role == MessageRole.ASSISTANT }.lastOrNull()
+    }
+
+    private fun isQuestion(text: String): Boolean {
+        val lower = text.lowercase().trim()
+        if (lower.contains("?") || lower.contains("？")) return true
+        val questionKeywords = listOf(
+            "kya", "kyu", "kyo", "kaise", "kab", "kahan", "kidhar", "kitna", "kitne",
+            "kisko", "kiska", "lgi ya nhi", "lagi ya nahi", "hai ya nahi", "hai ya nhi",
+            "lagi hai", "lgi hai", "status", "who", "what", "where", "when", "why", "how",
+            "क्या", "क्यों", "कैसे", "कहाँ", "कब", "कितना"
+        )
+        return questionKeywords.any { lower.contains(it) }
+    }
+
+    fun formatPreviousUserQuestionResponse(): String {
+        val prev = getPreviousUserQuestion(skipLast = true) ?: getPreviousUserMessage(skipLast = true)
+        return if (prev != null) {
+            "आपने अभी पूछा था: \"${prev.rawText}\""
+        } else {
+            "हाल ही में बातचीत में कोई पिछला सवाल दर्ज नहीं हुआ है।"
+        }
+    }
+
+    fun formatPreviousUserMessageResponse(): String {
+        val prev = getPreviousUserMessage(skipLast = true)
+        return if (prev != null) {
+            "आपने अभी बोला था: \"${prev.rawText}\""
+        } else {
+            "हाल ही में बातचीत में कोई पिछला संदेश दर्ज नहीं हुआ है।"
+        }
+    }
+
+    fun formatPreviousAssistantMessageResponse(): String {
+        val prev = getPreviousAssistantMessage()
+        return if (prev != null) {
+            "मैंने अभी कहा था: \"${prev.rawText}\""
+        } else {
+            "हाल ही में मेरा कोई पिछला जवाब दर्ज नहीं हुआ है।"
         }
     }
 
@@ -170,6 +288,7 @@ class ConversationContext(
             )
             lastFailure = failedResult
             lastExecutionResult = failedResult
+            executionHistory.addLast(failedResult)
         }
     }
 
@@ -190,6 +309,7 @@ class ConversationContext(
             )
             lastFailure = misResult
             lastExecutionResult = misResult
+            executionHistory.addLast(misResult)
         }
     }
 
@@ -201,6 +321,8 @@ class ConversationContext(
         lastFailure = null
         pendingConfirmation = null
         pendingClarification = null
+        conversationHistory.clear()
+        executionHistory.clear()
         recentRequestContext.clearHistory()
     }
 }

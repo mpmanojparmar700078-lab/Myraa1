@@ -2,6 +2,7 @@ package com.example.services
 
 import android.util.Log
 import com.example.BuildConfig
+import com.example.models.ApiKeyStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -32,6 +33,22 @@ class GeminiService(private val getCustomApiKey: () -> String) {
         .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
+    fun getApiKeyStatus(): ApiKeyStatus {
+        return try {
+            val customKey = getCustomApiKey().trim()
+            val buildKey = try { BuildConfig.GEMINI_API_KEY.trim() } catch (e: Throwable) { "" }
+            when {
+                customKey.isNotBlank() && customKey != "null" -> ApiKeyStatus.CONFIGURED
+                buildKey.isNotBlank() && buildKey != "null" -> ApiKeyStatus.CONFIGURED
+                else -> ApiKeyStatus.NOT_CONFIGURED
+            }
+        } catch (e: Exception) {
+            ApiKeyStatus.UNKNOWN
+        }
+    }
+
+    fun isConfigured(): Boolean = getApiKeyStatus() == ApiKeyStatus.CONFIGURED
 
     suspend fun generateResponse(prompt: String, conversationContext: String = ""): String = withContext(Dispatchers.IO) {
         val apiKey = getCustomApiKey().trim().ifBlank { BuildConfig.GEMINI_API_KEY.trim() }

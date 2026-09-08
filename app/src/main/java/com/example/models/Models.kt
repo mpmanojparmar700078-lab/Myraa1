@@ -68,6 +68,9 @@ enum class IntentType {
     MEMORY_QUERY,
     CONFIRMATION,
     DENIAL,
+    API_KEY_STATUS_QUERY,
+    WHY_QUERY,
+    META_CONVERSATION,
     UNKNOWN
 }
 
@@ -75,6 +78,9 @@ enum class MessageCategory {
     GREETING,
     GENERAL_CONVERSATION,
     QUESTION,
+    API_KEY_STATUS_QUERY,
+    WHY_QUESTION,
+    META_CONVERSATION,
     NEW_COMMAND,
     FOLLOW_UP,
     CONTEXT_QUESTION,
@@ -91,6 +97,30 @@ enum class MessageCategory {
     UNKNOWN
 }
 
+enum class MessageRole {
+    USER,
+    ASSISTANT,
+    SYSTEM
+}
+
+enum class ApiKeyStatus {
+    CONFIGURED,
+    NOT_CONFIGURED,
+    INVALID,
+    UNKNOWN
+}
+
+data class ConversationMessage(
+    val messageId: String = java.util.UUID.randomUUID().toString(),
+    val timestamp: Long = System.currentTimeMillis(),
+    val role: MessageRole,
+    val rawText: String,
+    val normalizedText: String,
+    var intent: IntentType = IntentType.UNKNOWN,
+    var response: String? = null,
+    val relatedRequestId: Long? = null
+)
+
 enum class ResponseType {
     TEXT,
     ACTION_PROGRESS,
@@ -102,6 +132,7 @@ enum class ResponseType {
     CONVERSATION,
     CONTEXT_REPORT,
     EXECUTION_REPORT,
+    API_KEY_REPORT,
     ERROR
 }
 

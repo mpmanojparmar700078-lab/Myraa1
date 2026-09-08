@@ -565,13 +565,132 @@ class LocalCommandParser {
     }
 
     private fun checkContextAndConversationQuestions(normalized: String): LocalCommandResult? {
-        // A. RECALL_RECENT_REQUESTS
+        // 0. API_KEY_STATUS_QUERY
+        val hasKeyWord = normalized.contains("api key") ||
+                normalized.contains("apikey") ||
+                normalized.contains("api ki") ||
+                normalized.contains("gemini key") ||
+                normalized.contains("gemini api") ||
+                (normalized.contains("key") && (normalized.contains("gemini") || normalized.contains("api") || normalized.contains("status")))
+        val statusWords = listOf(
+            "lgi ya nhi", "lagi ya nahi", "lagi hai", "lgi hai", "lagi h", "lgi h",
+            "status", "configured", "set hai", "hai ya nahi", "hai ya nhi", "dali hai",
+            "daali hai", "save hai", "check", "batao", "hai", "लगी है", "लगी या नहीं", "स्टेटस", "सेट है"
+        )
+        val directKeyPhrases = listOf(
+            "api key lgi ya nhi", "api key lagi ya nahi", "api key lagi hai", "api key lgi hai",
+            "api key status", "api key status kya hai", "api key ka status", "api key ka status kya hai",
+            "gemini key configured hai", "key set hai ya nahi", "key set hai ya nhi", "gemini key lagi hai",
+            "key lagi hai ya nahi", "api key lagi hai ya nahi", "api key lagi hai?", "api key lgi hai?",
+            "api key lgi ya nahi", "api key lagi ya nhi"
+        )
+        if (directKeyPhrases.any { normalized.contains(it) } || (hasKeyWord && statusWords.any { normalized.contains(it) })) {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.API_KEY_STATUS_QUERY,
+                    confidence = 1.0f,
+                    category = MessageCategory.API_KEY_STATUS_QUERY
+                ),
+                responseText = "API key स्थिति जाँची जा रही है...",
+                category = MessageCategory.API_KEY_STATUS_QUERY
+            )
+        }
+
+        // 1. META_CONVERSATION ("me kya bol rha hu or tum kya bol rhe ho")
+        val metaConvPhrases = listOf(
+            "me kya bol rha hu or tum kya bol rhe ho",
+            "me kya bol raha hu or tum kya bol rahe ho",
+            "me kya bol raha hu aur tum kya bol rahe ho",
+            "main kya bol raha hu aur tum kya bol rahe ho",
+            "mai kya bol raha hu aur tum kya bol rahe ho",
+            "me kya bol rha hu aur tum kya bol rhe ho",
+            "hum kya baat kar rahe", "hum kya baat kar rahe the",
+            "tum kya bol rahe ho", "kya bol rahe ho tum", "tum kya bol rahi ho",
+            "kya bol rhe ho", "tum kya bol rhe ho",
+            "me kya bol raha hu", "me kya bol rha hu", "mai kya bol raha hu",
+            "me kya pooch raha hu", "me kya puch raha hu"
+        )
+        if (metaConvPhrases.any { normalized.contains(it) }) {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.META_CONVERSATION,
+                    confidence = 1.0f,
+                    category = MessageCategory.META_CONVERSATION
+                ),
+                responseText = "बातचीत के संदर्भ की समीक्षा की जा रही है...",
+                category = MessageCategory.META_CONVERSATION
+            )
+        }
+
+        // 2. WHY_QUERY ("kyo", "kyu", "why?", "aisa kyu?")
+        val cleanedWhy = normalized.trim().removeSuffix("?").removeSuffix("!").removeSuffix("।").trim()
+        val whyExact = setOf(
+            "kyo", "kyu", "kyun", "why", "aisa kyu", "aisa kyo", "aisa kyun",
+            "fir kyu", "fir kyo", "phir kyu", "phir kyo", "ye kyu", "ye kyo", "yeh kyu",
+            "yeh kyo", "aisa kyu hua", "kyu aisa", "क्यों", "ऐसा क्यों", "फिर क्यों",
+            "यह क्यों", "ये क्यों"
+        )
+        if (whyExact.contains(cleanedWhy) || normalized.matches(Regex("(?i)^(kyo|kyu|kyun|why|aisa kyu|fir kyu|ye kyu|phir kyu|yeh kyu)[?!.]*$"))) {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.WHY_QUERY,
+                    confidence = 1.0f,
+                    category = MessageCategory.WHY_QUESTION
+                ),
+                responseText = "कारण जाँचा जा रहा है...",
+                category = MessageCategory.WHY_QUESTION
+            )
+        }
+
+        // 3. CONTEXT_QUERY ("mene kya pucha")
+        val userQuestionPhrases = listOf(
+            "mene kya pucha", "maine kya pucha", "mene kya poocha", "maine kya poocha",
+            "mene kya pucha tha", "maine kya pucha tha", "mene kya poocha tha", "maine kya poocha tha",
+            "what did i ask", "what did i ask you", "मैंने क्या पूछा", "मैंने क्या पूछा था"
+        )
+        if (userQuestionPhrases.any { normalized.contains(it) } && !normalized.contains("to do") && !normalized.contains("karne ko")) {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.CONTEXT_QUERY,
+                    executionPreference = "user_question",
+                    confidence = 1.0f,
+                    category = MessageCategory.CONTEXT_QUESTION
+                ),
+                responseText = "आपने पिछले सवाल के बारे में पूछा है।",
+                category = MessageCategory.CONTEXT_QUESTION
+            )
+        }
+
+        // 4. CONTEXT_QUERY ("tumne kya bola")
+        val assistantMessagePhrases = listOf(
+            "tumne kya bola", "tumne kya kaha", "tumne kya bola tha", "tumne kya kaha tha",
+            "what did you say", "तुमने क्या बोला", "तुमने क्या कहा"
+        )
+        if (assistantMessagePhrases.any { normalized.contains(it) }) {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.CONTEXT_QUERY,
+                    executionPreference = "assistant_response",
+                    confidence = 1.0f,
+                    category = MessageCategory.CONTEXT_QUESTION
+                ),
+                responseText = "आपने मेरे पिछले जवाब के बारे में पूछा है।",
+                category = MessageCategory.CONTEXT_QUESTION
+            )
+        }
+
+        // 5. RECALL_REQUEST / RECALL_RECENT_REQUESTS ("mene kya bola tha", "mene kya bola")
         val recallPhrases = listOf(
             "mene kya karne ko bola", "maine kya karne ko bola", "maine kya karne ko bola tha",
             "maine kya kaha tha", "maine kya bola", "mene kya bola", "maine kya bola tha",
             "maine tumhe kya karne ko bola tha", "what did i ask you to do", "what did i say",
             "what was my last command", "मैंने क्या बोला था", "मैंने क्या करने को बोला", "मैंने क्या कहा था",
-            "mene kya bola tha", "maine kya pucha", "mene kya pucha", "maine kya kaha"
+            "mene kya bola tha", "maine kya kaha"
         )
         if (recallPhrases.any { normalized.contains(it) || it.contains(normalized) } ||
             normalized.matches(Regex("(?i)^(mene|maine|hamne|मैंने)\\s+(kya|tumhe\\s+kya).*"))
