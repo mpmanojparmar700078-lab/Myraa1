@@ -1,0 +1,415 @@
+package com.example.brain
+
+import com.example.models.DetailedExecutionResult
+import com.example.models.ExecutionStatus
+import com.example.models.ExecutionStep
+import com.example.models.GeneratedResponse
+import com.example.models.IntentType
+import com.example.models.MessageCategory
+import com.example.models.ParsedIntent
+import com.example.models.PendingConfirmation
+import com.example.models.PendingConfirmationType
+import com.example.models.RequestState
+import com.example.models.ResponseType
+
+/**
+ * Centralized MyraResponseEngine:
+ *
+ * Enforces the Truthful Response Rule:
+ * Myra must NEVER say "काम पूरा हुआ" unless the requested outcome has actually been verified.
+ *
+ * Coordinates message category, parsed intent, conversation context, and execution results
+ * into single, consistent, truth-anchored user responses.
+ */
+class MyraResponseEngine(
+    private val resultReporter: ResultReporter = ResultReporter()
+) {
+
+    fun generateResponse(
+        category: MessageCategory,
+        intent: ParsedIntent,
+        context: ConversationContext,
+        executionResult: DetailedExecutionResult? = null,
+        confidence: Float = 1.0f,
+        requestId: Long = System.currentTimeMillis()
+    ): GeneratedResponse {
+        return when (category) {
+            MessageCategory.GREETING -> generateGreetingResponse(requestId)
+            MessageCategory.GENERAL_CONVERSATION -> generateConversationResponse(intent, requestId)
+            MessageCategory.QUESTION -> generateQuestionResponse(intent, requestId)
+            MessageCategory.CONTEXT_QUESTION -> generateContextReportResponse(intent, context, requestId)
+            MessageCategory.EXECUTION_STATUS -> generateExecutionReportResponse(intent, context, executionResult, requestId)
+            MessageCategory.FAILURE_FEEDBACK -> generateFailureFeedbackResponse(context, requestId)
+            MessageCategory.RETRY_REQUEST -> generateRetryResponse(context, requestId)
+            MessageCategory.CANCEL_REQUEST -> generateCancelResponse(requestId)
+            MessageCategory.CONFIRMATION -> generateConfirmationResponse(context, requestId)
+            MessageCategory.DENIAL -> generateDenialResponse(context, requestId)
+            MessageCategory.CORRECTION -> generateCorrectionResponse(intent, context, requestId)
+            MessageCategory.META_INSTRUCTION -> generateMetaInstructionResponse(intent, requestId)
+            MessageCategory.MEMORY_QUERY -> generateMemoryQueryResponse(requestId)
+            MessageCategory.PREFERENCE -> generatePreferenceResponse(intent, requestId)
+            MessageCategory.NEW_COMMAND, MessageCategory.FOLLOW_UP -> {
+                if (executionResult != null) {
+                    generateActionResultResponse(executionResult, requestId)
+                } else {
+                    GeneratedResponse(
+                        text = intent.responseText ?: "एक्शन शुरू किया जा रहा है...",
+                        responseType = ResponseType.ACTION_PROGRESS,
+                        requestId = requestId
+                    )
+                }
+            }
+            MessageCategory.UNKNOWN -> {
+                val reply = intent.responseText
+                    ?: "माफ़ कीजिए, मैं समझ नहीं पाई। कृपया दोबारा स्पष्ट शब्दों में बताएं।"
+                GeneratedResponse(
+                    text = reply,
+                    responseType = ResponseType.TEXT,
+                    requestId = requestId
+                )
+            }
+        }
+    }
+
+    private fun generateGreetingResponse(requestId: Long): GeneratedResponse {
+        return GeneratedResponse(
+            text = "नमस्ते! मैं यहाँ हूँ। बताइए, क्या करना है?",
+            responseType = ResponseType.CONVERSATION,
+            requestId = requestId
+        )
+    }
+
+    private fun generateConversationResponse(intent: ParsedIntent, requestId: Long): GeneratedResponse {
+        val query = intent.query?.lowercase() ?: intent.responseText?.lowercase() ?: ""
+        val text = when {
+            query.contains("kaise ho") || query.contains("kaisi ho") || query.contains("how are you") || query.contains("हाल") ->
+                "मैं बिल्कुल ठीक हूँ! बताइए, आज क्या करना है?"
+            query.contains("theek hai") || query.contains("achha") || query.contains("accha") || query.contains("ok") || query.contains("samajh gaya") ->
+                "जी, बताइए आगे क्या करना है।"
+            query.contains("thanks") || query.contains("thank you") || query.contains("shukriya") || query.contains("dhanyawad") || query.contains("धन्यवाद") ->
+                "आपका स्वागत है! कोई और काम हो तो बताइए।"
+            query.contains("wah") || query.contains("badhiya") || query.contains("shabash") ->
+                "धन्यवाद! आगे बताइए मैं क्या मदद करूँ।"
+            else ->
+                "जी, मैं सुन रही हूँ। बताइए क्या करना है।"
+        }
+        return GeneratedResponse(
+            text = text,
+            responseType = ResponseType.CONVERSATION,
+            requestId = requestId
+        )
+    }
+
+    private fun generateQuestionResponse(intent: ParsedIntent, requestId: Long): GeneratedResponse {
+        val query = intent.query?.lowercase() ?: ""
+        val text = if (query.contains("who are you") || query.contains("kaun ho") || query.contains("कौन हो")) {
+            "मैं Myra हूँ, आपकी स्मार्ट पर्सनल AI असिस्टेंट। मैं आपके फ़ोन पर ऐप्स खोलने, वीडियो चलाने और विभिन्न कार्य करने में मदद कर सकती हूँ।"
+        } else {
+            "मैं आपकी डिवाइस पर ऐप्स खोलने, सर्च करने और टास्क ऑटोमेट करने में मदद कर सकती हूँ। बताइए क्या करूँ?"
+        }
+        return GeneratedResponse(
+            text = text,
+            responseType = ResponseType.CONVERSATION,
+            requestId = requestId
+        )
+    }
+
+    private fun generateContextReportResponse(
+        intent: ParsedIntent,
+        context: ConversationContext,
+        requestId: Long
+    ): GeneratedResponse {
+        val report = context.formatRecallMessage()
+        return GeneratedResponse(
+            text = report,
+            responseType = ResponseType.CONTEXT_REPORT,
+            requestId = requestId
+        )
+    }
+
+    private fun generateExecutionReportResponse(
+        intent: ParsedIntent,
+        context: ConversationContext,
+        executionResult: DetailedExecutionResult?,
+        requestId: Long
+    ): GeneratedResponse {
+        val report = if (intent.targetIndex != null) {
+            context.formatExecutionReportForIndex(intent.targetIndex)
+        } else if (executionResult != null) {
+            formatDetailedResultText(executionResult)
+        } else {
+            context.formatLastExecutionReport()
+        }
+        return GeneratedResponse(
+            text = report,
+            responseType = ResponseType.EXECUTION_REPORT,
+            requestId = requestId,
+            executionStatus = executionResult?.finalStatus
+        )
+    }
+
+    private fun generateFailureFeedbackResponse(
+        context: ConversationContext,
+        requestId: Long
+    ): GeneratedResponse {
+        val lastReq = context.getLastRequest()
+        val text = if (lastReq != null) {
+            "ठीक है, पिछली request सफल नहीं हुई। मैं चाहें तो उसे दोबारा अलग तरीके से try कर सकती हूँ।"
+        } else {
+            "माफ़ कीजिए कि काम पूरा नहीं हुआ। मैंने इसे असफलता के रूप में नोट कर लिया है।"
+        }
+        return GeneratedResponse(
+            text = text,
+            responseType = ResponseType.CONVERSATION,
+            requestId = requestId,
+            pendingConfirmation = PendingConfirmation(
+                type = PendingConfirmationType.RETRY_PREVIOUS,
+                relatedRequestId = lastReq?.requestId,
+                prompt = "Kya main dobara try karun?"
+            )
+        )
+    }
+
+    private fun generateRetryResponse(context: ConversationContext, requestId: Long): GeneratedResponse {
+        val lastReq = context.getLastRequest()
+        val text = if (lastReq != null) {
+            "पिछला अनुरोध (\"${lastReq.rawUserCommand}\") फिर से दोहराया जा रहा है..."
+        } else {
+            "दोहराने के लिए कोई पिछला एक्शन नहीं मिला।"
+        }
+        return GeneratedResponse(
+            text = text,
+            responseType = ResponseType.ACTION_PROGRESS,
+            requestId = requestId
+        )
+    }
+
+    private fun generateCancelResponse(requestId: Long): GeneratedResponse {
+        return GeneratedResponse(
+            text = "कमांड रद्द कर दी गई है।",
+            responseType = ResponseType.CANCELLATION,
+            requestId = requestId,
+            executionStatus = ExecutionStatus.CANCELLED
+        )
+    }
+
+    private fun generateConfirmationResponse(context: ConversationContext, requestId: Long): GeneratedResponse {
+        val pending = context.clearPendingConfirmation()
+        return when (pending?.type) {
+            PendingConfirmationType.RETRY_PREVIOUS -> {
+                GeneratedResponse(
+                    text = "ठीक है, मैं दोबारा कोशिश कर रही हूँ...",
+                    responseType = ResponseType.ACTION_PROGRESS,
+                    requestId = requestId
+                )
+            }
+            PendingConfirmationType.NEED_MORE_HELP -> {
+                GeneratedResponse(
+                    text = "बताइए, मैं आपकी और क्या मदद करूँ?",
+                    responseType = ResponseType.CONVERSATION,
+                    requestId = requestId
+                )
+            }
+            else -> {
+                GeneratedResponse(
+                    text = "जी ठीक है, बताइए क्या करना है।",
+                    responseType = ResponseType.CONVERSATION,
+                    requestId = requestId
+                )
+            }
+        }
+    }
+
+    private fun generateDenialResponse(context: ConversationContext, requestId: Long): GeneratedResponse {
+        val pending = context.clearPendingConfirmation()
+        return when (pending?.type) {
+            PendingConfirmationType.RETRY_PREVIOUS -> {
+                GeneratedResponse(
+                    text = "ठीक है, मैंने दोहराने की प्रक्रिया रद्द कर दी है।",
+                    responseType = ResponseType.CONVERSATION,
+                    requestId = requestId
+                )
+            }
+            PendingConfirmationType.NEED_MORE_HELP -> {
+                GeneratedResponse(
+                    text = "ठीक है! जब भी जरूरत हो, मुझे बताइएगा।",
+                    responseType = ResponseType.CONVERSATION,
+                    requestId = requestId
+                )
+            }
+            else -> {
+                GeneratedResponse(
+                    text = "जी ठीक है।",
+                    responseType = ResponseType.CONVERSATION,
+                    requestId = requestId
+                )
+            }
+        }
+    }
+
+    private fun generateCorrectionResponse(
+        intent: ParsedIntent,
+        context: ConversationContext,
+        requestId: Long
+    ): GeneratedResponse {
+        return GeneratedResponse(
+            text = "माफ़ कीजिए, मेरी समझने में गलती हुई। मैंने इसे ठीक कर लिया है और अपनी समझ को अपडेट कर लिया है।",
+            responseType = ResponseType.TEXT,
+            requestId = requestId
+        )
+    }
+
+    private fun generateMetaInstructionResponse(intent: ParsedIntent, requestId: Long): GeneratedResponse {
+        return GeneratedResponse(
+            text = "समझ गई। अब से मैं उपलब्ध सभी स्टेप्स अपने आप (automatically) पूरे करने की कोशिश करूँगी।",
+            responseType = ResponseType.TEXT,
+            requestId = requestId
+        )
+    }
+
+    private fun generateMemoryQueryResponse(requestId: Long): GeneratedResponse {
+        val text = "मुझे आपकी प्राथमिकताओं और सीखे गए स्किल्स की जानकारी याद है। कोई भी संवेदनशील डेटा केवल आपके डिवाइस पर स्थानीय और सुरक्षित रहता है।"
+        return GeneratedResponse(
+            text = text,
+            responseType = ResponseType.TEXT,
+            requestId = requestId
+        )
+    }
+
+    private fun generatePreferenceResponse(intent: ParsedIntent, requestId: Long): GeneratedResponse {
+        return GeneratedResponse(
+            text = "आपकी प्राथमिकता सुरक्षित कर ली गई है।",
+            responseType = ResponseType.TEXT,
+            requestId = requestId
+        )
+    }
+
+    fun generateActionResultResponse(
+        result: DetailedExecutionResult,
+        requestId: Long
+    ): GeneratedResponse {
+        // Multi-task handling (Section 25)
+        if (result.subResults.isNotEmpty()) {
+            return generateMultiTaskResponse(result, requestId)
+        }
+
+        val text = formatDetailedResultText(result)
+        val responseType = when (result.finalStatus) {
+            ExecutionStatus.SUCCESS -> ResponseType.ACTION_SUCCESS
+            ExecutionStatus.PARTIAL_SUCCESS -> ResponseType.PARTIAL_SUCCESS
+            ExecutionStatus.FAILED -> ResponseType.ACTION_FAILURE
+            ExecutionStatus.CANCELLED -> ResponseType.CANCELLATION
+            ExecutionStatus.IN_PROGRESS -> ResponseType.ACTION_PROGRESS
+            ExecutionStatus.NOT_EXECUTED -> ResponseType.TEXT
+        }
+
+        return GeneratedResponse(
+            text = text,
+            responseType = responseType,
+            requestId = requestId,
+            executionStatus = result.finalStatus
+        )
+    }
+
+    private fun generateMultiTaskResponse(
+        result: DetailedExecutionResult,
+        requestId: Long
+    ): GeneratedResponse {
+        val subResults = result.subResults
+        val allSuccess = subResults.all { it.finalStatus == ExecutionStatus.SUCCESS && it.verificationStatus }
+        val allFailed = subResults.all { it.finalStatus == ExecutionStatus.FAILED }
+
+        if (allSuccess) {
+            val text = "सभी कार्य सफलतापूर्वक पूरे और सत्यापित हुए।"
+            return GeneratedResponse(
+                text = text,
+                responseType = ResponseType.ACTION_SUCCESS,
+                requestId = requestId,
+                executionStatus = ExecutionStatus.SUCCESS
+            )
+        }
+
+        if (allFailed) {
+            val text = "दिए गए कार्य पूरे नहीं हो सके।"
+            return GeneratedResponse(
+                text = text,
+                responseType = ResponseType.ACTION_FAILURE,
+                requestId = requestId,
+                executionStatus = ExecutionStatus.FAILED
+            )
+        }
+
+        // Mixed success / failure - Report independently!
+        // E.g. "Desi Gamer वाला YouTube task पूरा नहीं हुआ, लेकिन Chrome में Craftland खोलने का task सफल रहा।"
+        val descriptions = mutableListOf<String>()
+        for (sub in subResults) {
+            val app = sub.target?.replaceFirstChar { it.uppercase() } ?: sub.intent.app ?: "टास्क"
+            val queryDesc = sub.intent.query?.let { "'$it' वाला " } ?: ""
+            if (sub.finalStatus == ExecutionStatus.SUCCESS && sub.verificationStatus) {
+                descriptions.add("$queryDesc$app खोलने का task सफल रहा")
+            } else if (sub.finalStatus == ExecutionStatus.PARTIAL_SUCCESS) {
+                descriptions.add("$queryDesc$app task आंशिक रूप से चला (playback/page सत्यापित नहीं हुआ)")
+            } else {
+                descriptions.add("$queryDesc$app task पूरा नहीं हुआ")
+            }
+        }
+
+        val text = descriptions.joinToString("लेकिन ", postfix = "।") { "$it, " }
+            .replace(", लेकिन ", ", लेकिन ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        return GeneratedResponse(
+            text = if (descriptions.size == 2) {
+                "${descriptions[0]}, लेकिन ${descriptions[1]}।"
+            } else {
+                descriptions.joinToString("\n")
+            },
+            responseType = ResponseType.PARTIAL_SUCCESS,
+            requestId = requestId,
+            executionStatus = ExecutionStatus.PARTIAL_SUCCESS
+        )
+    }
+
+    private fun formatDetailedResultText(result: DetailedExecutionResult): String {
+        if (result.wasMisinterpreted) {
+            return "मैंने उस request को सही तरह से execute नहीं किया। मैंने उसके text को गलती से YouTube search query समझ लिया था।"
+        }
+
+        if (result.intent.type == IntentType.META_INSTRUCTION || result.metaInstruction != null) {
+            return "इस अनुरोध में आपने मुझे निर्देश दिया था कि मैं सारे स्टेप्स खुद करूँ। मैंने इस वरीयता (preference) को सेट कर लिया था।"
+        }
+
+        // Truthful reporting rule: If verification failed, NEVER claim success!
+        if (result.finalStatus == ExecutionStatus.PARTIAL_SUCCESS ||
+            (result.intent.type == IntentType.SEARCH_AND_PLAY && !result.verificationStatus) ||
+            result.isSearchOnlyStarted
+        ) {
+            val q = result.intent.query ?: "वीडियो"
+            return "मैंने YouTube पर '$q' की खोज शुरू की, लेकिन वीडियो play होना verify नहीं हो पाया (पुष्टि नहीं हुई)।"
+        }
+
+        if (result.finalStatus == ExecutionStatus.SUCCESS && result.verificationStatus) {
+            return when (result.intent.type) {
+                IntentType.SEARCH_AND_PLAY -> {
+                    val q = result.intent.query ?: "वीडियो"
+                    "YouTube पर '$q' का वीडियो चल रहा है (सत्यापित)।"
+                }
+                IntentType.OPEN_APP -> "${result.target ?: result.intent.app ?: "ऐप"} सफलतापूर्वक खोला गया।"
+                IntentType.OPEN_PAGE -> "पेज '${result.intent.query ?: result.target}' सफलतापूर्वक लोड हुआ।"
+                else -> result.summary ?: "काम पूरा हुआ और सत्यापित हुआ।"
+            }
+        }
+
+        if (result.finalStatus == ExecutionStatus.FAILED) {
+            val reason = result.failureReason ?: "स्क्रीन पर आवश्यक एलिमेंट नहीं मिला या एक्शन विफल रहा।"
+            return "काम पूरा नहीं हो सका: $reason"
+        }
+
+        if (result.finalStatus == ExecutionStatus.CANCELLED) {
+            return "अनुरोध रद्द कर दिया गया था।"
+        }
+
+        return result.summary ?: "अनुरोध की स्थिति: ${result.finalStatus}"
+    }
+}

@@ -3,6 +3,7 @@ package com.example.services
 import com.example.models.ActionResult
 import com.example.models.IntentType
 import com.example.models.LocalCommandResult
+import com.example.models.MessageCategory
 import com.example.models.ParsedIntent
 import com.example.platform.android.AppLauncher
 import java.util.Locale
@@ -37,53 +38,54 @@ class LocalCommandParser {
             return metaResult
         }
 
-        // 4. Challenge / Autonomous Test Requests ("tumhari marji se koi random target pura karo jisme kam se kam 6 steps hona chahiye")
+        // 4. Memory Queries ("tumhe kya yaad hai", "meri preferences kya hain")
+        val memoryResult = checkMemoryQuery(normalized)
+        if (memoryResult != null) {
+            return memoryResult
+        }
+
+        // 5. Context-dependent Confirmations & Denials ("haan", "nahi")
+        val confirmDenyResult = checkConfirmationAndDenial(normalized)
+        if (confirmDenyResult != null) {
+            return confirmDenyResult
+        }
+
+        // 6. Greetings, General Conversation & Identity Questions ("hii", "kaise ho", "who are you")
+        val greetingOrConvResult = checkGreetingAndConversation(normalized)
+        if (greetingOrConvResult != null) {
+            return greetingOrConvResult
+        }
+
+        // 7. Challenge / Autonomous Test Requests ("tumhari marji se koi random target pura karo jisme kam se kam 6 steps hona chahiye")
         val challengeResult = checkChallengeRequest(normalized)
         if (challengeResult != null) {
             return challengeResult
         }
 
-        // 5. Multi-command check (e.g. "... aur ...")
+        // 8. Multi-command check (e.g. "... aur ...")
         val multiResult = checkMultiCommand(trimmed)
         if (multiResult != null) {
             return multiResult
         }
 
-        // 6. Cancel request
-        if (matchesAny(normalized, listOf("cancel", "cancel karo", "rok do", "rehne do", "radd karo", "रद्द करो", "रहने दो", "रोक दो", "stop action", "stop"))) {
+        // 9. Cancel request
+        if (matchesAny(normalized, listOf("cancel", "cancel karo", "rok do", "rehne do", "radd karo", "रद्द करो", "रहने दो", "रोक दो", "stop action", "stop", "band karo", "ruk jao", "रुक जाओ"))) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.CANCEL_REQUEST),
-                responseText = "कमांड रद्द कर दी गई है।"
+                intent = ParsedIntent(type = IntentType.CANCEL_REQUEST, category = MessageCategory.CANCEL_REQUEST),
+                responseText = "कमांड रद्द कर दी गई है।",
+                category = MessageCategory.CANCEL_REQUEST
             )
         }
 
-        // 7. Clear chat
+        // 10. Clear chat
         if (matchesAny(normalized, listOf("clear chat", "chat clear karo", "chat saaf karo", "delete chat", "clear history", "saaf karo", "चैट साफ़ करो"))) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.CLEAR_CHAT),
+                intent = ParsedIntent(type = IntentType.CLEAR_CHAT, category = MessageCategory.NEW_COMMAND),
                 actionResult = ActionResult(success = true, message = "बातचीत साफ़ कर दी गई है (Chat cleared)"),
-                responseText = "बातचीत साफ़ कर दी गई है। अब आप नया सवाल पूछ सकते हैं।"
-            )
-        }
-
-        // 8. Greetings & Identity
-        if (matchesAny(normalized, listOf("hi", "hello", "hey", "namaste", "नमस्ते", "हेलो", "myra", "myra kaun ho", "tum kaun ho", "who are you"))) {
-            val reply = "नमस्ते! मैं Myra हूँ, आपकी पर्सनल AI असिस्टेंट। मैं ऐप्स खोलने, YouTube, सर्च और नेविगेशन में आपकी मदद कर सकती हूँ।"
-            return LocalCommandResult(
-                handled = true,
-                intent = ParsedIntent(type = IntentType.GENERAL_CHAT, responseText = reply),
-                responseText = reply
-            )
-        }
-
-        if (matchesAny(normalized, listOf("kaise ho", "how are you", "kya haal hai", "कैसी हो", "कैसे हो"))) {
-            val reply = "मैं बिल्कुल ठीक हूँ! आपकी क्या मदद करूँ? आप कह सकते हैं: 'YouTube खोलो', 'Camera खोलो', या 'Google पर सर्च करो'।"
-            return LocalCommandResult(
-                handled = true,
-                intent = ParsedIntent(type = IntentType.GENERAL_CHAT, responseText = reply),
-                responseText = reply
+                responseText = "बातचीत साफ़ कर दी गई है। अब आप नया सवाल पूछ सकते हैं।",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -91,16 +93,18 @@ class LocalCommandParser {
         if (matchesAny(normalized, listOf("go back", "back jao", "back", "peeche jao", "wapas jao", "wapas", "पीछे जाओ", "वापस"))) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.GO_BACK),
-                responseText = "वापस जाया जा रहा है..."
+                intent = ParsedIntent(type = IntentType.GO_BACK, category = MessageCategory.NEW_COMMAND),
+                responseText = "वापस जाया जा रहा है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
         if (matchesAny(normalized, listOf("go home", "home screen", "home jao", "ghar jao", "home", "होम स्क्रीन", "होम जाओ", "होम"))) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.GO_HOME),
-                responseText = "होम स्क्रीन पर जाया जा रहा है..."
+                intent = ParsedIntent(type = IntentType.GO_HOME, category = MessageCategory.NEW_COMMAND),
+                responseText = "होम स्क्रीन पर जाया जा रहा है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -108,16 +112,18 @@ class LocalCommandParser {
         if (matchesAny(normalized, listOf("scroll down", "neeche karo", "neeche scroll karo", "neeche jao", "नीचे करो", "नीचे स्क्रॉल करो"))) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.SCROLL_DOWN),
-                responseText = "नीचे स्क्रॉल किया जा रहा है..."
+                intent = ParsedIntent(type = IntentType.SCROLL_DOWN, category = MessageCategory.NEW_COMMAND),
+                responseText = "नीचे स्क्रॉल किया जा रहा है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
         if (matchesAny(normalized, listOf("scroll up", "upar karo", "upar scroll karo", "upar jao", "ऊपर करो", "ऊपर स्क्रॉल करो"))) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.SCROLL_UP),
-                responseText = "ऊपर स्क्रॉल किया जा रहा है..."
+                intent = ParsedIntent(type = IntentType.SCROLL_UP, category = MessageCategory.NEW_COMMAND),
+                responseText = "ऊपर स्क्रॉल किया जा रहा है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -125,8 +131,9 @@ class LocalCommandParser {
         if (matchesAny(normalized, listOf("read screen", "screen padho", "screen par kya hai", "kya dikh raha hai", "स्क्रीन पढ़ो"))) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.READ_SCREEN),
-                responseText = "स्क्रीन की जानकारी पढ़ी जा रही है..."
+                intent = ParsedIntent(type = IntentType.READ_SCREEN, category = MessageCategory.NEW_COMMAND),
+                responseText = "स्क्रीन की जानकारी पढ़ी जा रही है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -136,8 +143,9 @@ class LocalCommandParser {
         if (isPauseCommand) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.PAUSE, target = "pause"),
-                responseText = "पॉज़ किया जा रहा है..."
+                intent = ParsedIntent(type = IntentType.PAUSE, target = "pause", category = MessageCategory.NEW_COMMAND),
+                responseText = "पॉज़ किया जा रहा है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -146,8 +154,9 @@ class LocalCommandParser {
         if (isDirectPlayCommand) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.PLAY, target = "play"),
-                responseText = "प्ले किया जा रहा है..."
+                intent = ParsedIntent(type = IntentType.PLAY, target = "play", category = MessageCategory.NEW_COMMAND),
+                responseText = "प्ले किया जा रहा है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -156,8 +165,9 @@ class LocalCommandParser {
             if (hasLaunchSemantics(normalized) || normalized == "camera" || normalized == "कैमरा") {
                 return LocalCommandResult(
                     handled = true,
-                    intent = ParsedIntent(type = IntentType.OPEN_APP, app = "camera"),
-                    responseText = "कैमरा खोला जा रहा है..."
+                    intent = ParsedIntent(type = IntentType.OPEN_APP, app = "camera", category = MessageCategory.NEW_COMMAND),
+                    responseText = "कैमरा खोला जा रहा है...",
+                    category = MessageCategory.NEW_COMMAND
                 )
             }
         }
@@ -166,8 +176,9 @@ class LocalCommandParser {
         if (normalized.contains("dialer") || normalized.contains("phone dialer") || normalized.contains("डायलर") || normalized.contains("call lagao") || normalized.contains("phone milao")) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.OPEN_APP, app = "dialer"),
-                responseText = "फोन डायलर खोला जा रहा है..."
+                intent = ParsedIntent(type = IntentType.OPEN_APP, app = "dialer", category = MessageCategory.NEW_COMMAND),
+                responseText = "फोन डायलर खोला जा रहा है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -176,8 +187,9 @@ class LocalCommandParser {
             if (hasLaunchSemantics(normalized) || normalized == "settings" || normalized == "setting") {
                 return LocalCommandResult(
                     handled = true,
-                    intent = ParsedIntent(type = IntentType.OPEN_SETTINGS),
-                    responseText = "सिस्टम सेटिंग्स खोली जा रही हैं..."
+                    intent = ParsedIntent(type = IntentType.OPEN_SETTINGS, category = MessageCategory.NEW_COMMAND),
+                    responseText = "सिस्टम सेटिंग्स खोली जा रही हैं...",
+                    category = MessageCategory.NEW_COMMAND
                 )
             }
         }
@@ -204,8 +216,9 @@ class LocalCommandParser {
         if (normalized.startsWith("http://") || normalized.startsWith("https://") || (normalized.startsWith("www.") && normalized.contains("."))) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.OPEN_URL, target = trimmed),
-                responseText = "वेबसाइट खोली जा रही है: $trimmed"
+                intent = ParsedIntent(type = IntentType.OPEN_URL, target = trimmed, category = MessageCategory.NEW_COMMAND),
+                responseText = "वेबसाइट खोली जा रही है: $trimmed",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -215,8 +228,9 @@ class LocalCommandParser {
             if (query.isNotEmpty()) {
                 return LocalCommandResult(
                     handled = true,
-                    intent = ParsedIntent(type = IntentType.WEB_SEARCH, query = query),
-                    responseText = "Google पर '$query' खोजा जा रहा है..."
+                    intent = ParsedIntent(type = IntentType.WEB_SEARCH, query = query, category = MessageCategory.NEW_COMMAND),
+                    responseText = "Google पर '$query' खोजा जा रहा है...",
+                    category = MessageCategory.NEW_COMMAND
                 )
             }
         }
@@ -229,29 +243,13 @@ class LocalCommandParser {
      * Must NEVER be parsed as a YouTube or web search!
      */
     private fun checkFailureAndCorrection(normalized: String, original: String): LocalCommandResult? {
-        val failurePhrases = listOf(
-            "nahi hua", "kuch nahi hua", "ye nahi hua", "fail hua", "fail ho gaya",
-            "kaam nahi hua", "nahi chala", "video nahi chala", "chala nahi",
-            "kuch bhi nahi hua", "not working", "didn't work", "failed",
-            "नहीं हुआ", "कुछ नहीं हुआ", "फेल हो गया", "फेल हुआ"
-        )
-        if (failurePhrases.any { normalized == it || normalized.startsWith("$it ") || normalized.endsWith(" $it") }) {
-            return LocalCommandResult(
-                handled = true,
-                intent = ParsedIntent(
-                    type = IntentType.REPORT_FAILURE,
-                    userCorrection = "nahi hua",
-                    confidence = 1.0f
-                ),
-                responseText = "माफ़ कीजिए कि पिछला काम पूरा नहीं हुआ। मैंने इसे असफलता के रूप में रिकॉर्ड कर लिया है। आप 'दोबारा करो' कह सकते हैं।"
-            )
-        }
-
         val correctionPhrases = listOf(
-            "maine search karne ko nahi kaha tha", "maine search karne ko nahi bola tha",
+            "nahi mera matlab", "mera matlab ye tha", "mera matlab kuch aur tha", "mera matlab ye nahi tha",
+            "mera matlab", "maine search karne ko nahi kaha tha", "maine search karne ko nahi bola tha",
             "maine search nahi bola tha", "maine search karne ko nahi bola",
             "ye nahi kaha tha", "ye nahi bola tha", "maine yeh nahi kah raha tha",
             "main yeh nahi kah raha tha", "galat hai", "ye galat hai", "wrong hai",
+            "tum galat samjhe", "tumne galat samjha", "aisa nahi", "ऐसा नहीं",
             "galat interpret kiya", "maine aisa nahi bola tha"
         )
         if (correctionPhrases.any { normalized.contains(it) }) {
@@ -260,9 +258,172 @@ class LocalCommandParser {
                 intent = ParsedIntent(
                     type = IntentType.CORRECT_PREVIOUS_RESULT,
                     userCorrection = original,
+                    confidence = 1.0f,
+                    category = MessageCategory.CORRECTION
+                ),
+                responseText = "माफ़ कीजिए, मेरी समझने में गलती हुई। मैंने इसे ठीक कर लिया है और अपनी समझ को अपडेट कर लिया है।",
+                category = MessageCategory.CORRECTION,
+                confidence = 1.0f
+            )
+        }
+
+        val failurePhrases = listOf(
+            "nahi hua", "kuch nahi hua", "ye nahi hua", "fail hua", "fail ho gaya",
+            "kaam nahi hua", "nahi chala", "video nahi chala", "chala nahi",
+            "kuch bhi nahi hua", "not working", "didn't work", "failed",
+            "नहीं हुआ", "कुछ नहीं हुआ", "फेल हो गया", "फेल हुआ", "काम नहीं हुआ", "नहीं चला",
+            "tumne galat kiya"
+        )
+        val isWhyQuestion = normalized.contains("kyu") || normalized.contains("kyun") ||
+                normalized.contains("why") || normalized.contains("क्यों")
+        if (!isWhyQuestion && failurePhrases.any { normalized == it || normalized.startsWith("$it ") || normalized.endsWith(" $it") }) {
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.REPORT_FAILURE,
+                    userCorrection = "nahi hua",
+                    confidence = 1.0f,
+                    category = MessageCategory.FAILURE_FEEDBACK
+                ),
+                responseText = "ठीक है, पिछली request सफल नहीं हुई। मैं चाहें तो उसे दोबारा अलग तरीके से try कर सकती हूँ।",
+                category = MessageCategory.FAILURE_FEEDBACK,
+                confidence = 1.0f
+            )
+        }
+
+        return null
+    }
+
+    private fun checkMemoryQuery(normalized: String): LocalCommandResult? {
+        val memoryPhrases = listOf(
+            "tumhe kya yaad hai", "meri preferences kya hain", "tumne kya yaad rakha hai",
+            "tum mujhe kya yaad rakhte ho", "what do you remember", "kya yaad hai tumhe",
+            "meri memory", "yaad kya hai", "tumhe kya pata hai mere bare mein"
+        )
+        if (memoryPhrases.any { normalized.contains(it) || it.contains(normalized) }) {
+            val reply = "मुझे आपकी प्राथमिकताओं और सीखे गए स्किल्स की जानकारी याद है। कोई भी संवेदनशील डेटा केवल आपके डिवाइस पर सुरक्षित रहता है।"
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.MEMORY_QUERY,
+                    responseText = reply,
+                    category = MessageCategory.MEMORY_QUERY,
                     confidence = 1.0f
                 ),
-                responseText = "माफ़ कीजिए, मेरी समझने में गलती हुई। मैंने इसे ठीक कर लिया है और भविष्य के लिए अपनी समझ को अपडेट कर लिया है।"
+                responseText = reply,
+                category = MessageCategory.MEMORY_QUERY,
+                confidence = 1.0f
+            )
+        }
+        return null
+    }
+
+    private fun checkConfirmationAndDenial(normalized: String): LocalCommandResult? {
+        val confirmPhrases = listOf("haan", "हाँ", "yes", "ha", "haa", "haa ji", "yes please", "sure", "bilkul")
+        if (confirmPhrases.any { normalized == it }) {
+            val reply = "जी ठीक है, बताइए क्या करना है।"
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.CONFIRMATION,
+                    responseText = reply,
+                    category = MessageCategory.CONFIRMATION,
+                    confidence = 1.0f
+                ),
+                responseText = reply,
+                category = MessageCategory.CONFIRMATION,
+                confidence = 1.0f
+            )
+        }
+
+        val denyPhrases = listOf("nahi", "नहीं", "no", "nah", "nope", "nahi rehne do", "rehne do mat karo")
+        if (denyPhrases.any { normalized == it }) {
+            val reply = "जी ठीक है।"
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.DENIAL,
+                    responseText = reply,
+                    category = MessageCategory.DENIAL,
+                    confidence = 1.0f
+                ),
+                responseText = reply,
+                category = MessageCategory.DENIAL,
+                confidence = 1.0f
+            )
+        }
+        return null
+    }
+
+    private fun checkGreetingAndConversation(normalized: String): LocalCommandResult? {
+        val greetingPhrases = listOf(
+            "hi", "hii", "hiii", "hello", "hey", "heyy", "namaste", "namaskar",
+            "नमस्ते", "हेलो", "सुप्रभात", "pranam", "प्रणाम"
+        )
+        if (greetingPhrases.any { normalized == it }) {
+            val reply = "नमस्ते! मैं यहाँ हूँ। बताइए, क्या करना है?"
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.GREETING,
+                    responseText = reply,
+                    category = MessageCategory.GREETING,
+                    confidence = 1.0f
+                ),
+                responseText = reply,
+                category = MessageCategory.GREETING,
+                confidence = 1.0f
+            )
+        }
+
+        val conversationPhrases = listOf(
+            "kaise ho", "how are you", "kya haal hai", "कैसी हो", "कैसे हो",
+            "tum kaise ho", "आप कैसे हो", "theek hai", "thik hai", "achha", "accha",
+            "samajh gaya", "samajh gayi", "samajh aa gaya", "ok", "okay", "wah",
+            "badhiya", "shabash", "thanks", "thank you", "shukriya", "dhanyawad", "धन्यवाद"
+        )
+        if (conversationPhrases.any { normalized == it || normalized.startsWith("$it ") || normalized.endsWith(" $it") }) {
+            val reply = when {
+                normalized.contains("kaise ho") || normalized.contains("हाल") ->
+                    "मैं बिल्कुल ठीक हूँ! बताइए, आज क्या करना है?"
+                normalized.contains("thanks") || normalized.contains("shukriya") || normalized.contains("धन्यवाद") ->
+                    "आपका स्वागत है! कोई और काम हो तो बताइए।"
+                else ->
+                    "जी, बताइए आगे क्या करना है।"
+            }
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.GENERAL_CONVERSATION,
+                    query = normalized,
+                    responseText = reply,
+                    category = MessageCategory.GENERAL_CONVERSATION,
+                    confidence = 1.0f
+                ),
+                responseText = reply,
+                category = MessageCategory.GENERAL_CONVERSATION,
+                confidence = 1.0f
+            )
+        }
+
+        val identityQuestions = listOf(
+            "myra kaun ho", "tum kaun ho", "who are you", "tum kya kar sakti ho",
+            "what can you do", "aap kaun ho", "myra kya hai", "tum kon ho"
+        )
+        if (identityQuestions.any { normalized.contains(it) }) {
+            val reply = "मैं Myra हूँ, आपकी स्मार्ट पर्सनल AI असिस्टेंट। मैं ऐप्स खोलने, YouTube, सर्च और नेविगेशन में आपकी मदद कर सकती हूँ।"
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.GENERAL_CHAT,
+                    query = normalized,
+                    responseText = reply,
+                    category = MessageCategory.QUESTION,
+                    confidence = 1.0f
+                ),
+                responseText = reply,
+                category = MessageCategory.QUESTION,
+                confidence = 1.0f
             )
         }
 
@@ -335,9 +496,11 @@ class LocalCommandParser {
                     type = IntentType.META_INSTRUCTION,
                     metaInstruction = "ASSISTANT_SHOULD_PERFORM_AVAILABLE_STEPS_AUTOMATICALLY",
                     executionPreference = "PERFORM_STEPS_AUTOMATICALLY",
-                    confidence = 1.0f
+                    confidence = 1.0f,
+                    category = MessageCategory.META_INSTRUCTION
                 ),
-                responseText = "समझ गई। अब से मैं उपलब्ध सभी स्टेप्स अपने आप (automatically) पूरे करने की कोशिश करूँगी।"
+                responseText = "समझ गई। अब से मैं उपलब्ध सभी स्टेप्स अपने आप (automatically) पूरे करने की कोशिश करूँगी।",
+                category = MessageCategory.META_INSTRUCTION
             )
         }
 
@@ -365,9 +528,11 @@ class LocalCommandParser {
                 handled = true,
                 intent = ParsedIntent(
                     type = IntentType.CHALLENGE_REQUEST,
-                    confidence = 1.0f
+                    confidence = 1.0f,
+                    category = MessageCategory.NEW_COMMAND
                 ),
-                responseText = "चैलेंज स्वीकार किया गया! 6-स्टेप्स का सुरक्षित ऑटोनॉमस वर्कफ़्लो निष्पादित किया जा रहा है..."
+                responseText = "चैलेंज स्वीकार किया गया! 6-स्टेप्स का सुरक्षित ऑटोनॉमस वर्कफ़्लो निष्पादित किया जा रहा है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -380,16 +545,18 @@ class LocalCommandParser {
         if (parts.size >= 2) {
             val subResults = parts.map { parse(it) }
             if (subResults.all { it.handled && it.intent != null }) {
-                val subIntents = subResults.map { it.intent!! }
+                val subIntents = subResults.map { it.intent!!.copy(category = it.category.takeIf { c -> c != MessageCategory.UNKNOWN } ?: MessageCategory.NEW_COMMAND) }
                 return LocalCommandResult(
                     handled = true,
                     intent = ParsedIntent(
                         type = IntentType.MULTI_ACTION,
                         actions = subIntents,
                         subIntents = subIntents,
-                        confidence = 0.95f
+                        confidence = 0.95f,
+                        category = MessageCategory.NEW_COMMAND
                     ),
-                    responseText = "दोनों कमांड प्रोसेस किए जा रहे हैं..."
+                    responseText = "दोनों कमांड प्रोसेस किए जा रहे हैं...",
+                    category = MessageCategory.NEW_COMMAND
                 )
             }
         }
@@ -410,8 +577,13 @@ class LocalCommandParser {
         ) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.RECALL_RECENT_REQUESTS, confidence = 1.0f),
-                responseText = "आपने हाल ही में दिए गए कमांड के बारे में पूछा है।"
+                intent = ParsedIntent(
+                    type = IntentType.RECALL_RECENT_REQUESTS,
+                    confidence = 1.0f,
+                    category = MessageCategory.CONTEXT_QUESTION
+                ),
+                responseText = "आपने हाल ही में दिए गए कमांड के बारे में पूछा है।",
+                category = MessageCategory.CONTEXT_QUESTION
             )
         }
 
@@ -449,13 +621,15 @@ class LocalCommandParser {
                     type = IntentType.REPORT_LAST_EXECUTION,
                     targetIndex = targetIndex,
                     referenceType = if (targetIndex != null) "INDEX" else "LAST",
-                    confidence = 1.0f
+                    confidence = 1.0f,
+                    category = MessageCategory.EXECUTION_STATUS
                 ),
                 responseText = if (targetIndex != null) {
                     "अनुरोध #$targetIndex की स्थिति जाँची जा रही है।"
                 } else {
                     "पिछले एक्शन की स्थिति जाँची जा रही है।"
-                }
+                },
+                category = MessageCategory.EXECUTION_STATUS
             )
         }
 
@@ -468,8 +642,13 @@ class LocalCommandParser {
         if (explainPhrases.any { normalized.contains(it) }) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.EXPLAIN_LAST_FAILURE, confidence = 1.0f),
-                responseText = "पिछले काम के पूरा न होने का कारण जाँचा जा रहा है।"
+                intent = ParsedIntent(
+                    type = IntentType.EXPLAIN_LAST_FAILURE,
+                    confidence = 1.0f,
+                    category = MessageCategory.EXECUTION_STATUS
+                ),
+                responseText = "पिछले काम के पूरा न होने का कारण जाँचा जा रहा है।",
+                category = MessageCategory.EXECUTION_STATUS
             )
         }
 
@@ -481,8 +660,13 @@ class LocalCommandParser {
         if (retryPhrases.any { normalized == it || normalized.startsWith("$it ") || normalized.endsWith(" $it") }) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.RETRY_LAST_REQUEST, confidence = 1.0f),
-                responseText = "पिछला अनुरोध फिर से दोहराया जा रहा है..."
+                intent = ParsedIntent(
+                    type = IntentType.RETRY_LAST_REQUEST,
+                    confidence = 1.0f,
+                    category = MessageCategory.RETRY_REQUEST
+                ),
+                responseText = "पिछला अनुरोध फिर से दोहराया जा रहा है...",
+                category = MessageCategory.RETRY_REQUEST
             )
         }
 
@@ -569,13 +753,15 @@ class LocalCommandParser {
                 query = query,
                 targetType = "VIDEO",
                 action = "PLAY",
-                confidence = 0.98f
+                confidence = 0.98f,
+                category = MessageCategory.NEW_COMMAND
             ),
             responseText = if (intentType == IntentType.SEARCH_AND_PLAY) {
                 "YouTube पर '$query' का वीडियो चलाया जा रहा है..."
             } else {
                 "YouTube पर '$query' खोजा जा रहा है..."
-            }
+            },
+            category = MessageCategory.NEW_COMMAND
         )
     }
 
@@ -592,8 +778,9 @@ class LocalCommandParser {
         if (query.isBlank()) {
             return LocalCommandResult(
                 handled = true,
-                intent = ParsedIntent(type = IntentType.OPEN_APP, app = "chrome", target = AppLauncher.PKG_CHROME, confidence = 0.95f),
-                responseText = "Chrome ब्राउज़र खोला जा रहा है..."
+                intent = ParsedIntent(type = IntentType.OPEN_APP, app = "chrome", target = AppLauncher.PKG_CHROME, confidence = 0.95f, category = MessageCategory.NEW_COMMAND),
+                responseText = "Chrome ब्राउज़र खोला जा रहा है...",
+                category = MessageCategory.NEW_COMMAND
             )
         }
 
@@ -604,9 +791,11 @@ class LocalCommandParser {
                 app = "chrome",
                 target = query,
                 query = query,
-                confidence = 0.95f
+                confidence = 0.95f,
+                category = MessageCategory.NEW_COMMAND
             ),
-            responseText = "Chrome में '$query' खोला जा रहा है..."
+            responseText = "Chrome में '$query' खोला जा रहा है...",
+            category = MessageCategory.NEW_COMMAND
         )
     }
 
@@ -663,8 +852,9 @@ class LocalCommandParser {
                 if (stripped.isEmpty() || hasLaunchWord || normalized == name || normalized == "open $name") {
                     return LocalCommandResult(
                         handled = true,
-                        intent = ParsedIntent(type = IntentType.OPEN_APP, app = name, target = pkg, confidence = 0.95f),
-                        responseText = "$name ऐप खोला जा रहा है..."
+                        intent = ParsedIntent(type = IntentType.OPEN_APP, app = name, target = pkg, confidence = 0.95f, category = MessageCategory.NEW_COMMAND),
+                        responseText = "$name ऐप खोला जा रहा है...",
+                        category = MessageCategory.NEW_COMMAND
                     )
                 }
             }
@@ -682,8 +872,9 @@ class LocalCommandParser {
             if (cleaned.length in 2..30) {
                 return LocalCommandResult(
                     handled = true,
-                    intent = ParsedIntent(type = IntentType.OPEN_APP, app = cleaned, confidence = 0.85f),
-                    responseText = "$cleaned ऐप खोला जा रहा है..."
+                    intent = ParsedIntent(type = IntentType.OPEN_APP, app = cleaned, confidence = 0.85f, category = MessageCategory.NEW_COMMAND),
+                    responseText = "$cleaned ऐप खोला जा रहा है...",
+                    category = MessageCategory.NEW_COMMAND
                 )
             }
         }

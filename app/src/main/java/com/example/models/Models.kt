@@ -53,8 +53,95 @@ enum class IntentType {
     MULTI_ACTION,
     PUBLIC_API,
     GENERAL_CHAT,
+    GREETING,
+    MEMORY_QUERY,
+    CONFIRMATION,
+    DENIAL,
     UNKNOWN
 }
+
+enum class MessageCategory {
+    GREETING,
+    GENERAL_CONVERSATION,
+    QUESTION,
+    NEW_COMMAND,
+    FOLLOW_UP,
+    CONTEXT_QUESTION,
+    EXECUTION_STATUS,
+    FAILURE_FEEDBACK,
+    RETRY_REQUEST,
+    CANCEL_REQUEST,
+    CONFIRMATION,
+    DENIAL,
+    CORRECTION,
+    META_INSTRUCTION,
+    PREFERENCE,
+    MEMORY_QUERY,
+    UNKNOWN
+}
+
+enum class ResponseType {
+    TEXT,
+    ACTION_PROGRESS,
+    ACTION_SUCCESS,
+    ACTION_FAILURE,
+    PARTIAL_SUCCESS,
+    CLARIFICATION,
+    CANCELLATION,
+    CONVERSATION,
+    CONTEXT_REPORT,
+    EXECUTION_REPORT,
+    ERROR
+}
+
+enum class ExecutionStatus {
+    SUCCESS,
+    PARTIAL_SUCCESS,
+    FAILED,
+    CANCELLED,
+    IN_PROGRESS,
+    NOT_EXECUTED
+}
+
+enum class PendingConfirmationType {
+    RETRY_PREVIOUS,
+    NEED_MORE_HELP,
+    CUSTOM
+}
+
+data class PendingConfirmation(
+    val type: PendingConfirmationType,
+    val relatedRequestId: Long? = null,
+    val prompt: String = ""
+)
+
+data class DetailedExecutionResult(
+    val requestId: Long,
+    val userCommand: String,
+    val intent: ParsedIntent,
+    val target: String? = null,
+    val currentState: RequestState = RequestState.SUCCESS,
+    val steps: List<ExecutionStep> = emptyList(),
+    val successfulSteps: List<String> = emptyList(),
+    val failedSteps: List<String> = emptyList(),
+    val verificationStatus: Boolean = false,
+    val finalStatus: ExecutionStatus = ExecutionStatus.SUCCESS,
+    val failureReason: String? = null,
+    val summary: String? = null,
+    val wasMisinterpreted: Boolean = false,
+    val isSearchOnlyStarted: Boolean = false,
+    val metaInstruction: String? = null,
+    val itemIndex: Int? = null,
+    val subResults: List<DetailedExecutionResult> = emptyList()
+)
+
+data class GeneratedResponse(
+    val text: String,
+    val responseType: ResponseType,
+    val requestId: Long,
+    val pendingConfirmation: PendingConfirmation? = null,
+    val executionStatus: ExecutionStatus? = null
+)
 
 enum class RequestState {
     INTENT_RECEIVED,
@@ -137,7 +224,8 @@ data class ParsedIntent(
     val targetIndex: Int? = null,
     val referenceType: String? = null,
     val userCorrection: String? = null,
-    val executionPreference: String? = null
+    val executionPreference: String? = null,
+    val category: MessageCategory = MessageCategory.UNKNOWN
 )
 
 enum class AssistantState(
@@ -161,7 +249,8 @@ data class LocalCommandResult(
     val actionResult: ActionResult? = null,
     val responseText: String? = null,
     val confidence: Float = 1.0f,
-    val reason: String? = null
+    val reason: String? = null,
+    val category: MessageCategory = MessageCategory.UNKNOWN
 )
 
 data class InstalledAppInfo(

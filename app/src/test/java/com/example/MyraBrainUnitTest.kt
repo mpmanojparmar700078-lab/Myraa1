@@ -2,16 +2,23 @@ package com.example
 
 import com.example.accessibility.YouTubeResultAnalyzer
 import com.example.brain.ConfidenceEngine
+import com.example.brain.ConversationContext
+import com.example.brain.MyraResponseEngine
 import com.example.brain.PrivacyFilter
 import com.example.brain.RecentRequestContext
 import com.example.brain.RecordedTask
 import com.example.data.ExperienceEntity
 import com.example.data.LearnedSkillEntity
 import com.example.models.ActionResult
+import com.example.models.DetailedExecutionResult
+import com.example.models.ExecutionStatus
 import com.example.models.IntentType
+import com.example.models.MessageCategory
 import com.example.models.ParsedIntent
+import com.example.models.PendingConfirmationType
 import com.example.models.RequestResult
 import com.example.models.RequestState
+import com.example.models.ResponseType
 import com.example.models.ScreenNodeInfo
 import com.example.services.LocalCommandParser
 import org.junit.Assert.assertEquals
@@ -383,5 +390,212 @@ class MyraBrainUnitTest {
         assertTrue("Expected handled", res.handled)
         assertNotNull(res.intent)
         assertEquals(IntentType.CHALLENGE_REQUEST, res.intent?.type)
+    }
+
+    // =========================================================================
+    // CHAT & RESPONSE BRAIN V1 SPECIFIC TESTS
+    // =========================================================================
+
+    // Test 18: Greeting classification ("Hii", "Namaste", "Hello")
+    @Test
+    fun test18_GreetingClassification() {
+        val greetings = listOf("Hii", "hi", "hello", "hey", "namaste", "नमस्ते", "हेलो")
+        for (g in greetings) {
+            val res = parser.parse(g)
+            assertTrue("Expected handled for '$g'", res.handled)
+            assertEquals("Expected GREETING category for '$g'", MessageCategory.GREETING, res.category)
+            assertEquals("Expected GREETING intent for '$g'", IntentType.GREETING, res.intent?.type)
+        }
+
+        val responseEngine = MyraResponseEngine()
+        val context = ConversationContext()
+        val res = parser.parse("Hii")
+        val response = responseEngine.generateResponse(res.category, res.intent!!, context)
+        assertEquals(ResponseType.CONVERSATION, response.responseType)
+        assertTrue(response.text.contains("नमस्ते") || response.text.contains("यहाँ हूँ"))
+        assertFalse("Must NOT be an action search", response.text.contains("खोजा जा रहा"))
+    }
+
+    // Test 19: Conversation classification ("Kaise ho", "Theek hai")
+    @Test
+    fun test19_ConversationClassification() {
+        val kaiseHo = parser.parse("Kaise ho")
+        assertTrue(kaiseHo.handled)
+        assertEquals(MessageCategory.GENERAL_CONVERSATION, kaiseHo.category)
+
+        val theekHai = parser.parse("Theek hai")
+        assertTrue(theekHai.handled)
+        assertEquals(MessageCategory.GENERAL_CONVERSATION, theekHai.category)
+
+        val responseEngine = MyraResponseEngine()
+        val context = ConversationContext()
+        val resp1 = responseEngine.generateResponse(kaiseHo.category, kaiseHo.intent!!, context)
+        assertTrue(resp1.text.contains("ठीक हूँ"))
+
+        val resp2 = responseEngine.generateResponse(theekHai.category, theekHai.intent!!, context)
+        assertTrue(resp2.text.contains("बताइए आगे") || resp2.text.contains("जी"))
+    }
+
+    // Test 20: Context question ("Mene kya bola") -> MessageCategory.CONTEXT_QUESTION
+    @Test
+    fun test20_ContextQuestionCategory() {
+        val res = parser.parse("mene kya bola")
+        assertTrue(res.handled)
+        assertEquals(MessageCategory.CONTEXT_QUESTION, res.category)
+        assertEquals(IntentType.RECALL_RECENT_REQUESTS, res.intent?.type)
+    }
+
+    // Test 21: Execution status ("1 wale me tumne kya kiya", "Kyu nahi hua")
+    @Test
+    fun test21_ExecutionStatusCategory() {
+        val res1 = parser.parse("1 wale me tumne kya kiya")
+        assertTrue(res1.handled)
+        assertEquals(MessageCategory.EXECUTION_STATUS, res1.category)
+        assertEquals(1, res1.intent?.targetIndex)
+
+        val res2 = parser.parse("kyu nahi hua")
+        assertTrue(res2.handled)
+        assertEquals(MessageCategory.EXECUTION_STATUS, res2.category)
+        assertEquals(IntentType.EXPLAIN_LAST_FAILURE, res2.intent?.type)
+    }
+
+    // Test 22: Failure feedback ("Nahi hua") -> MessageCategory.FAILURE_FEEDBACK
+    @Test
+    fun test22_FailureFeedbackCategory() {
+        val res = parser.parse("nahi hua")
+        assertTrue(res.handled)
+        assertEquals(MessageCategory.FAILURE_FEEDBACK, res.category)
+        assertEquals(IntentType.REPORT_FAILURE, res.intent?.type)
+
+        val responseEngine = MyraResponseEngine()
+        val context = ConversationContext()
+        val response = responseEngine.generateResponse(res.category, res.intent!!, context)
+        assertTrue(response.text.contains("सफल नहीं हुई") || response.text.contains("असफलता"))
+        assertNotNull(response.pendingConfirmation)
+        assertEquals(PendingConfirmationType.RETRY_PREVIOUS, response.pendingConfirmation?.type)
+    }
+
+    // Test 23: Retry request ("Dobara karo", "Phir se karo")
+    @Test
+    fun test23_RetryRequestCategory() {
+        val res = parser.parse("dobara karo")
+        assertTrue(res.handled)
+        assertEquals(MessageCategory.RETRY_REQUEST, res.category)
+        assertEquals(IntentType.RETRY_LAST_REQUEST, res.intent?.type)
+
+        val res2 = parser.parse("phir se karo")
+        assertTrue(res2.handled)
+        assertEquals(MessageCategory.RETRY_REQUEST, res2.category)
+    }
+
+    // Test 24: Cancel request ("Ruk jao", "Cancel", "Rok do")
+    @Test
+    fun test24_CancelRequestCategory() {
+        val res = parser.parse("ruk jao")
+        assertTrue(res.handled)
+        assertEquals(MessageCategory.CANCEL_REQUEST, res.category)
+        assertEquals(IntentType.CANCEL_REQUEST, res.intent?.type)
+
+        val res2 = parser.parse("cancel")
+        assertTrue(res2.handled)
+        assertEquals(MessageCategory.CANCEL_REQUEST, res2.category)
+    }
+
+    // Test 25: Confirmation and Denial ("Haan", "Nahi")
+    @Test
+    fun test25_ConfirmationAndDenialCategories() {
+        val haan = parser.parse("haan")
+        assertTrue(haan.handled)
+        assertEquals(MessageCategory.CONFIRMATION, haan.category)
+
+        val nahi = parser.parse("nahi")
+        assertTrue(nahi.handled)
+        assertEquals(MessageCategory.DENIAL, nahi.category)
+    }
+
+    // Test 26: Correction ("Nahi mera matlab kuch aur tha", "ye nahi bola tha")
+    @Test
+    fun test26_CorrectionCategory() {
+        val res = parser.parse("nahi mera matlab ye nahi tha")
+        assertTrue(res.handled)
+        assertEquals(MessageCategory.CORRECTION, res.category)
+        assertEquals(IntentType.CORRECT_PREVIOUS_RESULT, res.intent?.type)
+    }
+
+    // Test 27: Meta instruction ("Me chahta hu vo tum khud karo")
+    @Test
+    fun test27_MetaInstructionCategory() {
+        val res = parser.parse("me chahta hu vo sare steps youtube par ho or vo tum khud kro")
+        assertTrue(res.handled)
+        assertEquals(MessageCategory.META_INSTRUCTION, res.category)
+        assertEquals(IntentType.META_INSTRUCTION, res.intent?.type)
+    }
+
+    // Test 28: Memory query ("Tumhe kya yaad hai")
+    @Test
+    fun test28_MemoryQueryCategory() {
+        val res = parser.parse("tumhe kya yaad hai")
+        assertTrue(res.handled)
+        assertEquals(MessageCategory.MEMORY_QUERY, res.category)
+        assertEquals(IntentType.MEMORY_QUERY, res.intent?.type)
+    }
+
+    // Test 29: New command ("YouTube par desi gamer ka video play kro")
+    @Test
+    fun test29_NewCommandCategory() {
+        val res = parser.parse("youtube par desi gamer ka video play kro")
+        assertTrue(res.handled)
+        assertEquals(MessageCategory.NEW_COMMAND, res.category)
+        assertEquals(IntentType.SEARCH_AND_PLAY, res.intent?.type)
+        assertEquals("desi gamer", res.intent?.query?.lowercase()?.trim())
+    }
+
+    // Test 30: Truthful Response Rule in MyraResponseEngine
+    // NEVER says "काम पूरा हुआ" unless actual verification is true!
+    @Test
+    fun test30_TruthfulResponseRule() {
+        val responseEngine = MyraResponseEngine()
+        val context = ConversationContext()
+
+        // Unverified execution result (e.g. search opened, but video playback was not verified)
+        val unverifiedResult = DetailedExecutionResult(
+            requestId = 101L,
+            userCommand = "youtube par desi gamer play karo",
+            intent = ParsedIntent(type = IntentType.SEARCH_AND_PLAY, app = "youtube", query = "desi gamer"),
+            finalStatus = ExecutionStatus.PARTIAL_SUCCESS,
+            verificationStatus = false,
+            summary = "YouTube पर 'desi gamer' खोजा गया, लेकिन वीडियो चलने की पुष्टि नहीं हो सकी।"
+        )
+
+        val unverifiedResponse = responseEngine.generateResponse(
+            category = MessageCategory.NEW_COMMAND,
+            intent = unverifiedResult.intent,
+            context = context,
+            executionResult = unverifiedResult
+        )
+
+        assertFalse("Must NEVER claim 'काम पूरा हुआ' when unverified", unverifiedResponse.text.contains("काम पूरा हुआ"))
+        assertFalse("Must NEVER claim 'सफलतापूर्वक पूरा' when unverified", unverifiedResponse.text.contains("सफलतापूर्वक पूरा"))
+        assertTrue("Must truthfully mention search or partial verification",
+            unverifiedResponse.text.contains("खोजा गया") || unverifiedResponse.text.contains("पुष्टि नहीं"))
+
+        // Verified execution result
+        val verifiedResult = DetailedExecutionResult(
+            requestId = 102L,
+            userCommand = "youtube par desi gamer play karo",
+            intent = ParsedIntent(type = IntentType.SEARCH_AND_PLAY, app = "youtube", query = "desi gamer"),
+            finalStatus = ExecutionStatus.SUCCESS,
+            verificationStatus = true,
+            summary = "YouTube पर 'desi gamer' का वीडियो चल रहा है।"
+        )
+
+        val verifiedResponse = responseEngine.generateResponse(
+            category = MessageCategory.NEW_COMMAND,
+            intent = verifiedResult.intent,
+            context = context,
+            executionResult = verifiedResult
+        )
+
+        assertTrue("Verified response must confirm playback", verifiedResponse.text.contains("चल रहा है") || verifiedResponse.text.contains("पूरा हुआ"))
     }
 }

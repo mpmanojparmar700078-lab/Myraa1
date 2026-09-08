@@ -12,6 +12,7 @@ import com.example.models.DiagnosticLog
 import com.example.models.ExecutionDecision
 import com.example.models.InstalledAppInfo
 import com.example.models.IntentType
+import com.example.models.MessageCategory
 import com.example.models.ParsedIntent
 import com.example.models.RequestResult
 import com.example.models.RequestState
@@ -58,6 +59,8 @@ class MyraCore(
     private val learningEngine = LearningEngine(memoryRepository, confidenceEngine)
 
     val resultReporter = ResultReporter()
+    val responseEngine = MyraResponseEngine(resultReporter)
+    val conversationContext = ConversationContext()
     val recentRequestContext = RecentRequestContext(resultReporter)
 
     private val currentRequestId = AtomicLong(0L)
@@ -246,6 +249,33 @@ class MyraCore(
                 IntentType.CHALLENGE_REQUEST -> {
                     return executeChallengeWorkflow(requestId, rawQuery, normalized, decision.intent)
                 }
+                IntentType.GREETING, IntentType.GENERAL_CONVERSATION, IntentType.CONFIRMATION,
+                IntentType.DENIAL, IntentType.MEMORY_QUERY, IntentType.GENERAL_CHAT -> {
+                    val cat = decision.intent.category.takeIf { it != MessageCategory.UNKNOWN } ?: when (decision.intent.type) {
+                        IntentType.GREETING -> MessageCategory.GREETING
+                        IntentType.GENERAL_CONVERSATION -> MessageCategory.GENERAL_CONVERSATION
+                        IntentType.CONFIRMATION -> MessageCategory.CONFIRMATION
+                        IntentType.DENIAL -> MessageCategory.DENIAL
+                        IntentType.MEMORY_QUERY -> MessageCategory.MEMORY_QUERY
+                        else -> MessageCategory.QUESTION
+                    }
+                    val generated = responseEngine.generateResponse(
+                        category = cat,
+                        intent = decision.intent,
+                        context = conversationContext,
+                        requestId = requestId
+                    )
+                    logDiagnostic("CONVERSATION", "Direct response for category $cat: ${generated.text}")
+                    conversationContext.recordUserTurn(rawQuery, decision.intent, cat)
+                    conversationContext.recordAssistantTurn(generated.text, cat)
+                    return ExecutionResult(
+                        replyText = generated.text,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = generated.text),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
                 else -> { /* Proceed to normal execution */ }
             }
 
@@ -293,6 +323,7 @@ class MyraCore(
                 plannedActions = plannedActions,
                 tasks = recordedTasks
             )
+            conversationContext.recordUserTurn(rawQuery, decision.intent, decision.intent.category)
             recentRequestContext.updateRequestState(requestId, RequestState.PLANNING)
 
             // 4. Execute according to decision
@@ -353,6 +384,7 @@ class MyraCore(
                 result = reqResult,
                 isSearchOnlyStarted = isSearchOnly && result.success
             )
+            conversationContext.recordAssistantTurn(finalReply, decision.intent.category)
 
             logDiagnostic("VERIFIER", "Result state=$finalState, verified=${result.isVerified}: \"${finalReply.take(40)}\"")
 
