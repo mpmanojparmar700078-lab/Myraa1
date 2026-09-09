@@ -408,15 +408,39 @@ class LocalCommandParser {
         }
 
         val identityQuestions = listOf(
-            "myra kaun ho", "tum kaun ho", "who are you", "tum kya kar sakti ho",
-            "what can you do", "aap kaun ho", "myra kya hai", "tum kon ho"
+            "tum kon ho", "tum kaun ho", "tum koun ho", "kon ho tum", "kaun ho tum", "koun ho tum",
+            "aap kon ho", "aap kaun ho", "aap koun ho", "who are you", "who are u", "who r u",
+            "tum kya ho", "aap kya ho", "myra kon hai", "myra kaun hai", "myra kya hai",
+            "myra kaun ho", "myra kon ho", "tumhara naam kya hai", "tera naam kya hai",
+            "what is your name", "what are you", "तुम कौन हो", "आप कौन हैं", "कौन हो तुम"
         )
-        if (identityQuestions.any { normalized.contains(it) }) {
-            val reply = "मैं Myra हूँ, आपकी स्मार्ट पर्सनल AI असिस्टेंट। मैं ऐप्स खोलने, YouTube, सर्च और नेविगेशन में आपकी मदद कर सकती हूँ।"
+        if (identityQuestions.any { normalized == it || normalized.contains(it) }) {
+            val reply = "मैं Myra हूँ, आपका AI assistant। मैं आपकी बातचीत समझने और आपके निर्देशों के अनुसार मदद करने के लिए हूँ।"
             return LocalCommandResult(
                 handled = true,
                 intent = ParsedIntent(
-                    type = IntentType.GENERAL_CHAT,
+                    type = IntentType.IDENTITY_QUESTION,
+                    query = normalized,
+                    responseText = reply,
+                    category = MessageCategory.IDENTITY_QUESTION,
+                    confidence = 1.0f
+                ),
+                responseText = reply,
+                category = MessageCategory.IDENTITY_QUESTION,
+                confidence = 1.0f
+            )
+        }
+
+        val capabilityQuestions = listOf(
+            "tum kya kar sakti ho", "tum kya karti ho", "what can you do", "kya kar sakti ho",
+            "tumhare features kya hai", "aap kya kar sakti ho"
+        )
+        if (capabilityQuestions.any { normalized.contains(it) }) {
+            val reply = "मैं आपकी डिवाइस पर ऐप्स खोलने, सर्च करने और टास्क ऑटोमेट करने में मदद कर सकती हूँ। बताइए क्या करूँ?"
+            return LocalCommandResult(
+                handled = true,
+                intent = ParsedIntent(
+                    type = IntentType.QUESTION,
                     query = normalized,
                     responseText = reply,
                     category = MessageCategory.QUESTION,
@@ -665,35 +689,39 @@ class LocalCommandParser {
             )
         }
 
-        // 4. CONTEXT_QUERY ("tumne kya bola")
+        // 4. ASSISTANT_RECALL_QUERY ("tumne kya bola", "tumne kya kaha", "what did you say")
         val assistantMessagePhrases = listOf(
             "tumne kya bola", "tumne kya kaha", "tumne kya bola tha", "tumne kya kaha tha",
-            "what did you say", "तुमने क्या बोला", "तुमने क्या कहा"
+            "tumne abhi kya bola", "tumne abhi kya kaha", "what did you say", "what did you tell me",
+            "तुमने क्या बोला", "तुमने क्या कहा", "आपने क्या कहा", "आपने क्या बोला"
         )
         if (assistantMessagePhrases.any { normalized.contains(it) }) {
             return LocalCommandResult(
                 handled = true,
                 intent = ParsedIntent(
-                    type = IntentType.CONTEXT_QUERY,
+                    type = IntentType.ASSISTANT_RECALL_QUERY,
                     executionPreference = "assistant_response",
                     confidence = 1.0f,
-                    category = MessageCategory.CONTEXT_QUESTION
+                    category = MessageCategory.ASSISTANT_RECALL_QUERY
                 ),
                 responseText = "आपने मेरे पिछले जवाब के बारे में पूछा है।",
-                category = MessageCategory.CONTEXT_QUESTION
+                category = MessageCategory.ASSISTANT_RECALL_QUERY
             )
         }
 
-        // 5. RECALL_REQUEST / RECALL_RECENT_REQUESTS ("mene kya bola tha", "mene kya bola")
+        // 5. RECALL_REQUEST / RECALL_RECENT_REQUESTS ("mene kya bola", "maine kya bola", "mene kya bola tha", "mene kya karne ko bola", "what did i say")
         val recallPhrases = listOf(
+            "mene kya bola tha", "maine kya bola tha", "mene kya bola", "maine kya bola",
+            "maine kya kaha tha", "mene kya kaha tha", "maine kya kaha", "mene kya kaha",
+            "maine abhi kya bola", "mene abhi kya bola", "maine abhi kya kaha", "mene abhi kya kaha",
+            "what did i say", "what did i just say", "what was my last message",
+            "मैंने क्या बोला था", "मैंने क्या बोला", "मैंने क्या कहा था", "मैंने क्या कहा",
             "mene kya karne ko bola", "maine kya karne ko bola", "maine kya karne ko bola tha",
-            "maine kya kaha tha", "maine kya bola", "mene kya bola", "maine kya bola tha",
-            "maine tumhe kya karne ko bola tha", "what did i ask you to do", "what did i say",
-            "what was my last command", "मैंने क्या बोला था", "मैंने क्या करने को बोला", "मैंने क्या कहा था",
-            "mene kya bola tha", "maine kya kaha"
+            "maine tumhe kya karne ko bola tha", "mene tumhe kya karne ko bola",
+            "what did i ask you to do", "what was my last command", "मैंने क्या करने को बोला"
         )
-        if (recallPhrases.any { normalized.contains(it) || it.contains(normalized) } ||
-            normalized.matches(Regex("(?i)^(mene|maine|hamne|मैंने)\\s+(kya|tumhe\\s+kya).*"))
+        if (recallPhrases.any { normalized == it || normalized.contains(it) } ||
+            normalized.matches(Regex("(?i)^(mene|maine|hamne|मैंने)\\s+(kya|tumhe\\s+kya)\\s+(bola|kaha|karne).*"))
         ) {
             return LocalCommandResult(
                 handled = true,
@@ -702,7 +730,7 @@ class LocalCommandParser {
                     confidence = 1.0f,
                     category = MessageCategory.CONTEXT_QUESTION
                 ),
-                responseText = "आपने हाल ही में दिए गए कमांड के बारे में पूछा है।",
+                responseText = "आपने हाल ही में दिए गए संदेश/कमांड के बारे में पूछा है।",
                 category = MessageCategory.CONTEXT_QUESTION
             )
         }

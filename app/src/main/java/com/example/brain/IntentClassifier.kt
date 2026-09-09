@@ -109,15 +109,25 @@ object IntentClassifier {
             )
         }
 
-        // 8. Context Query ("mene kya pucha" -> previous user question/message)
+        // 8. Assistant Recall Query ("tumne kya bola", "tumne kya kaha", "what did you say")
+        if (isAssistantRecallQuery(normalized)) {
+            return ClassificationResult(
+                intent = IntentType.ASSISTANT_RECALL_QUERY,
+                category = MessageCategory.ASSISTANT_RECALL_QUERY,
+                confidence = 1.0f,
+                contextReference = contextRef,
+                preference = "assistant_response"
+            )
+        }
+
+        // 8b. Context Query ("mene kya pucha" -> previous user question/message)
         if (isContextQuery(normalized)) {
-            val isAssistantRecall = normalized.contains("tumne kya")
             return ClassificationResult(
                 intent = IntentType.CONTEXT_QUERY,
                 category = MessageCategory.CONTEXT_QUESTION,
                 confidence = 1.0f,
                 contextReference = contextRef,
-                preference = if (isAssistantRecall) "assistant_response" else "user_question"
+                preference = "user_question"
             )
         }
 
@@ -195,8 +205,8 @@ object IntentClassifier {
         }
         if (isIdentityQuestion(normalized)) {
             return ClassificationResult(
-                intent = IntentType.QUESTION,
-                category = MessageCategory.QUESTION,
+                intent = IntentType.IDENTITY_QUESTION,
+                category = MessageCategory.IDENTITY_QUESTION,
                 confidence = 1.0f
             )
         }
@@ -345,26 +355,36 @@ object IntentClassifier {
                 normalized.matches(Regex("(?i)^(kyo|kyu|kyun|why|aisa kyu|fir kyu|ye kyu|phir kyu|yeh kyu)[?!.]*$"))
     }
 
+    private fun isAssistantRecallQuery(normalized: String): Boolean {
+        val phrases = listOf(
+            "tumne kya bola", "tumne kya kaha", "tumne kya bola tha", "tumne kya kaha tha",
+            "tumne abhi kya bola", "tumne abhi kya kaha", "what did you say", "what did you tell me",
+            "तुमने क्या बोला", "तुमने क्या कहा", "आपने क्या कहा", "आपने क्या बोला"
+        )
+        return phrases.any { normalized.contains(it) }
+    }
+
     private fun isContextQuery(normalized: String): Boolean {
+        if (isAssistantRecallQuery(normalized)) return false
         val contextPhrases = listOf(
             "mene kya pucha", "maine kya pucha", "mene kya poocha", "maine kya poocha",
             "mene kya pucha tha", "maine kya pucha tha", "mene kya poocha tha", "maine kya poocha tha",
-            "what did i ask", "what did i ask you", "मैंने क्या पूछा", "मैंने क्या पूछा था",
-            "tumne kya bola", "tumne kya kaha", "tumne kya bola tha", "tumne kya kaha tha",
-            "what did you say", "तुमने क्या बोला", "तुमने क्या कहा"
+            "maine abhi kya pucha", "mene abhi kya pucha",
+            "what did i ask", "what did i ask you", "मैंने क्या पूछा", "मैंने क्या पूछा था"
         )
         return contextPhrases.any { normalized.contains(it) }
     }
 
     private fun isRecallQuery(normalized: String): Boolean {
-        if (isContextQuery(normalized)) return false
+        if (isContextQuery(normalized) || isAssistantRecallQuery(normalized)) return false
         val recallPhrases = listOf(
             "mene kya bola tha", "maine kya bola tha", "mene kya bola", "maine kya bola",
-            "maine kya kaha tha", "mene kya kaha tha", "mene kya karne ko bola", "maine kya karne ko bola",
-            "what did i say", "what was my last message", "what was my last command",
-            "मैंने क्या बोला था", "मैंने क्या कहा था", "मैंने क्या करने को बोला"
+            "maine kya kaha tha", "mene kya kaha tha", "maine kya kaha", "mene kya kaha",
+            "maine abhi kya bola", "mene abhi kya bola", "maine abhi kya kaha", "mene abhi kya kaha",
+            "what did i say", "what did i just say", "what was my last message",
+            "मैंने क्या बोला था", "मैंने क्या बोला", "मैंने क्या कहा था", "मैंने क्या कहा"
         )
-        return recallPhrases.any { normalized.contains(it) } ||
+        return recallPhrases.any { normalized.contains(it) || it.contains(normalized) } ||
                 normalized.matches(Regex("(?i)^(mene|maine|hamne|मैंने)\\s+(kya|tumhe\\s+kya).*"))
     }
 
@@ -414,8 +434,14 @@ object IntentClassifier {
     }
 
     private fun isIdentityQuestion(normalized: String): Boolean {
-        val idPhrases = listOf("tum kaun ho", "kaun ho tum", "who are you", "what is your name", "tera naam kya hai", "tumhara naam kya hai")
-        return idPhrases.any { normalized.contains(it) }
+        val idPhrases = listOf(
+            "tum kon ho", "tum kaun ho", "tum koun ho", "kon ho tum", "kaun ho tum", "koun ho tum",
+            "aap kon ho", "aap kaun ho", "aap koun ho", "who are you", "who are u", "who r u",
+            "tum kya ho", "aap kya ho", "myra kon hai", "myra kaun hai", "myra kya hai",
+            "myra kaun ho", "myra kon ho", "tumhara naam kya hai", "tera naam kya hai",
+            "what is your name", "what are you", "तुम कौन हो", "आप कौन हैं", "कौन हो तुम"
+        )
+        return idPhrases.any { normalized == it || normalized.contains(it) }
     }
 
     private fun isChallengeRequest(normalized: String): Boolean {

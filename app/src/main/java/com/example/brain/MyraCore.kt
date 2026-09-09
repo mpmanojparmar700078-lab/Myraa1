@@ -124,6 +124,9 @@ class MyraCore(
             val decision = planDecision(rawQuery, normalized, installedApps)
             logDiagnostic("DECISION", "Selected source: ${decision.source} (confidence: ${String.format("%.2f", decision.confidence)}) - ${decision.explanation}")
 
+            // Update user message with classified intent and category
+            conversationContext.recordUserTurn(rawQuery, decision.intent, decision.intent.category)
+
             // 3. Local Context Questions & Direct Non-Action Intents
             when (decision.intent.type) {
                 IntentType.API_KEY_STATUS_QUERY -> {
@@ -149,6 +152,19 @@ class MyraCore(
                     conversationContext.recordAssistantTurn(reply, MessageCategory.CONTEXT_QUESTION)
                     conversationContext.recordAssistantResponse(reply, intent = IntentType.CONTEXT_QUERY, relatedRequestId = requestId)
                     logDiagnostic("CONTEXT_QUERY", "Answering context query: $reply")
+                    return ExecutionResult(
+                        replyText = reply,
+                        intent = decision.intent,
+                        actionResult = ActionResult(success = true, isVerified = true, message = reply),
+                        decisionSource = DecisionSource.LOCAL_PARSER,
+                        confidence = 1.0f
+                    )
+                }
+                IntentType.ASSISTANT_RECALL_QUERY -> {
+                    val reply = conversationContext.formatPreviousAssistantMessageResponse()
+                    conversationContext.recordAssistantTurn(reply, MessageCategory.ASSISTANT_RECALL_QUERY)
+                    conversationContext.recordAssistantResponse(reply, intent = IntentType.ASSISTANT_RECALL_QUERY, relatedRequestId = requestId)
+                    logDiagnostic("ASSISTANT_RECALL", "Answering assistant recall query: $reply")
                     return ExecutionResult(
                         replyText = reply,
                         intent = decision.intent,
@@ -184,10 +200,16 @@ class MyraCore(
                     )
                 }
                 IntentType.RECALL_REQUEST, IntentType.RECALL_RECENT_REQUESTS, IntentType.RECALL_RECENT_REQUEST -> {
-                    val recallReply = if (decision.intent.type == IntentType.RECALL_REQUEST) {
-                        conversationContext.formatPreviousUserMessageResponse()
+                    val isCommandSpecific = normalized.contains("karne ko") || normalized.contains("to do") || normalized.contains("command")
+                    val recallReply = if (isCommandSpecific) {
+                        val cmdRecall = recentRequestContext.formatRecallMessage()
+                        if (cmdRecall.contains("कोई कमांड रिकॉर्ड नहीं") && conversationContext.hasUserMessages()) {
+                            conversationContext.formatPreviousUserMessageResponse()
+                        } else {
+                            cmdRecall
+                        }
                     } else {
-                        recentRequestContext.formatRecallMessage()
+                        conversationContext.formatPreviousUserMessageResponse()
                     }
                     conversationContext.recordAssistantTurn(recallReply, MessageCategory.CONTEXT_QUESTION)
                     conversationContext.recordAssistantResponse(recallReply, intent = decision.intent.type, relatedRequestId = requestId)
@@ -330,10 +352,11 @@ class MyraCore(
                 IntentType.CHALLENGE_REQUEST -> {
                     return executeChallengeWorkflow(requestId, rawQuery, normalized, decision.intent)
                 }
-                IntentType.GREETING, IntentType.GENERAL_CONVERSATION, IntentType.CONFIRMATION,
+                IntentType.GREETING, IntentType.IDENTITY_QUESTION, IntentType.GENERAL_CONVERSATION, IntentType.CONFIRMATION,
                 IntentType.DENIAL, IntentType.MEMORY_QUERY, IntentType.GENERAL_CHAT, IntentType.QUESTION -> {
                     val cat = decision.intent.category.takeIf { it != MessageCategory.UNKNOWN } ?: when (decision.intent.type) {
                         IntentType.GREETING -> MessageCategory.GREETING
+                        IntentType.IDENTITY_QUESTION -> MessageCategory.IDENTITY_QUESTION
                         IntentType.GENERAL_CONVERSATION -> MessageCategory.GENERAL_CONVERSATION
                         IntentType.CONFIRMATION -> MessageCategory.CONFIRMATION
                         IntentType.DENIAL -> MessageCategory.DENIAL

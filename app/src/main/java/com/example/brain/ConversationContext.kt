@@ -69,8 +69,15 @@ class ConversationContext(
 
     fun recordUserTurn(message: String, intent: ParsedIntent? = null, category: com.example.models.MessageCategory? = null) {
         lastUserMessage = message
-        val normalized = TextNormalizer.normalize(message)
+        val last = conversationHistory.lastOrNull { it.role == MessageRole.USER }
         val intType = intent?.type ?: IntentType.UNKNOWN
+        if (last != null && last.rawText == message) {
+            if (intType != IntentType.UNKNOWN) {
+                last.intent = intType
+            }
+            return
+        }
+        val normalized = TextNormalizer.normalize(message)
         val convMsg = ConversationMessage(
             role = MessageRole.USER,
             rawText = message,
@@ -91,6 +98,12 @@ class ConversationContext(
     ): ConversationMessage {
         lastAssistantMessage = text
         pendingConfirmation = confirmation
+        val last = conversationHistory.lastOrNull { it.role == MessageRole.ASSISTANT }
+        if (last != null && last.rawText == text && (System.currentTimeMillis() - last.timestamp) < 3000) {
+            if (intent != IntentType.UNKNOWN) last.intent = intent
+            if (relatedRequestId != null) last.relatedRequestId = relatedRequestId
+            return last
+        }
         val convMsg = ConversationMessage(
             role = MessageRole.ASSISTANT,
             rawText = text,
@@ -185,6 +198,11 @@ class ConversationContext(
         }
     }
 
+    fun hasUserMessages(skipLast: Boolean = true): Boolean {
+        val userMessages = conversationHistory.filter { it.role == MessageRole.USER }
+        return if (skipLast) userMessages.size >= 2 else userMessages.isNotEmpty()
+    }
+
     /**
      * Retrieves previous user message from ConversationHistory.
      * When current user message has already been recorded, skipLast=true skips it.
@@ -208,6 +226,7 @@ class ConversationContext(
         return pool.findLast { msg ->
             isQuestion(msg.rawText) ||
             msg.intent == IntentType.QUESTION ||
+            msg.intent == IntentType.IDENTITY_QUESTION ||
             msg.intent == IntentType.API_KEY_STATUS_QUERY ||
             msg.intent == IntentType.CONTEXT_QUERY ||
             msg.intent == IntentType.WHY_QUERY ||
@@ -226,7 +245,9 @@ class ConversationContext(
             "kya", "kyu", "kyo", "kaise", "kab", "kahan", "kidhar", "kitna", "kitne",
             "kisko", "kiska", "lgi ya nhi", "lagi ya nahi", "hai ya nahi", "hai ya nhi",
             "lagi hai", "lgi hai", "status", "who", "what", "where", "when", "why", "how",
-            "क्या", "क्यों", "कैसे", "कहाँ", "कब", "कितना"
+            "kon ho", "kaun ho", "koun ho", "kon hai", "kaun hai", "koun hai",
+            "who are", "who is", "who are you",
+            "क्या", "क्यों", "कैसे", "कहाँ", "कब", "कितना", "कौन"
         )
         return questionKeywords.any { lower.contains(it) }
     }
@@ -234,7 +255,7 @@ class ConversationContext(
     fun formatPreviousUserQuestionResponse(): String {
         val prev = getPreviousUserQuestion(skipLast = true) ?: getPreviousUserMessage(skipLast = true)
         return if (prev != null) {
-            "आपने अभी पूछा था: \"${prev.rawText}\""
+            "आपने पूछा था: \"${prev.rawText}\""
         } else {
             "हाल ही में बातचीत में कोई पिछला सवाल दर्ज नहीं हुआ है।"
         }
@@ -243,7 +264,8 @@ class ConversationContext(
     fun formatPreviousUserMessageResponse(): String {
         val prev = getPreviousUserMessage(skipLast = true)
         return if (prev != null) {
-            "आपने अभी बोला था: \"${prev.rawText}\""
+            val verb = if (isQuestion(prev.rawText) || prev.intent == IntentType.QUESTION || prev.intent == IntentType.IDENTITY_QUESTION) "पूछा" else "कहा"
+            "आपने अभी $verb था: \"${prev.rawText}\""
         } else {
             "हाल ही में बातचीत में कोई पिछला संदेश दर्ज नहीं हुआ है।"
         }

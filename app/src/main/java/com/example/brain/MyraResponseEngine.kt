@@ -37,8 +37,16 @@ class MyraResponseEngine(
     ): GeneratedResponse {
         return when (category) {
             MessageCategory.GREETING -> generateGreetingResponse(requestId)
+            MessageCategory.IDENTITY_QUESTION -> generateIdentityResponse(requestId)
             MessageCategory.GENERAL_CONVERSATION -> generateConversationResponse(intent, requestId)
-            MessageCategory.QUESTION -> generateQuestionResponse(intent, requestId)
+            MessageCategory.QUESTION -> {
+                if (intent.type == IntentType.IDENTITY_QUESTION) {
+                    generateIdentityResponse(requestId)
+                } else {
+                    generateQuestionResponse(intent, requestId)
+                }
+            }
+            MessageCategory.ASSISTANT_RECALL_QUERY -> generateContextReportResponse(intent, context, requestId)
             MessageCategory.API_KEY_STATUS_QUERY -> {
                 val status = apiKeyStatusProvider?.invoke() ?: ApiKeyStatus.NOT_CONFIGURED
                 GeneratedResponse(
@@ -124,15 +132,34 @@ class MyraResponseEngine(
         )
     }
 
+    fun generateIdentityResponse(requestId: Long): GeneratedResponse {
+        return GeneratedResponse(
+            text = "मैं Myra हूँ, आपका AI assistant। मैं आपकी बातचीत समझने और आपके निर्देशों के अनुसार मदद करने के लिए हूँ।",
+            responseType = ResponseType.CONVERSATION,
+            requestId = requestId
+        )
+    }
+
     private fun generateQuestionResponse(intent: ParsedIntent, requestId: Long): GeneratedResponse {
         val query = intent.query?.lowercase() ?: intent.responseText?.lowercase() ?: ""
+        if (!intent.responseText.isNullOrBlank() &&
+            !intent.responseText!!.contains("जाँची जा रही") &&
+            !intent.responseText!!.contains("प्रोसेस किए जा रहे") &&
+            !intent.responseText!!.contains("कमांड")
+        ) {
+            return GeneratedResponse(
+                text = intent.responseText!!,
+                responseType = ResponseType.CONVERSATION,
+                requestId = requestId
+            )
+        }
         val text = when {
-            query.contains("who are you") || query.contains("kaun ho") || query.contains("कौन हो") || query.contains("naam kya") ->
-                "मैं Myra हूँ, आपकी स्मार्ट पर्सनल AI असिस्टेंट। मैं आपके फ़ोन पर ऐप्स खोलने, वीडियो चलाने और विभिन्न कार्य करने में मदद कर सकती हूँ।"
+            query.contains("who are you") || query.contains("kaun ho") || query.contains("kon ho") || query.contains("कौन हो") || query.contains("naam kya") ->
+                "मैं Myra हूँ, आपका AI assistant। मैं आपकी बातचीत समझने और आपके निर्देशों के अनुसार मदद करने के लिए हूँ।"
             query.contains("kya kar sakti ho") || query.contains("what can you do") || query.contains("kya karti ho") ->
                 "मैं आपकी डिवाइस पर ऐप्स खोलने, सर्च करने और टास्क ऑटोमेट करने में मदद कर सकती हूँ। बताइए क्या करूँ?"
             else ->
-                "मैं इसे सही तरह समझ नहीं पाई। क्या आप अपने पिछले सवाल के बारे में पूछ रहे हैं, या कोई नया काम करना चाहते हैं?"
+                "जी, मैं सुन रही हूँ। बताइए क्या करना है।"
         }
         return GeneratedResponse(
             text = text,
@@ -153,6 +180,9 @@ class MyraResponseEngine(
                 } else {
                     context.formatPreviousUserQuestionResponse()
                 }
+            }
+            IntentType.ASSISTANT_RECALL_QUERY -> {
+                context.formatPreviousAssistantMessageResponse()
             }
             IntentType.RECALL_REQUEST -> {
                 context.formatPreviousUserMessageResponse()

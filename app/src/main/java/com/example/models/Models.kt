@@ -71,12 +71,15 @@ enum class IntentType {
     API_KEY_STATUS_QUERY,
     WHY_QUERY,
     META_CONVERSATION,
+    IDENTITY_QUESTION,
+    ASSISTANT_RECALL_QUERY,
     UNKNOWN
 }
 
 enum class MessageCategory {
     GREETING,
     GENERAL_CONVERSATION,
+    IDENTITY_QUESTION,
     QUESTION,
     API_KEY_STATUS_QUERY,
     WHY_QUESTION,
@@ -94,6 +97,7 @@ enum class MessageCategory {
     META_INSTRUCTION,
     PREFERENCE,
     MEMORY_QUERY,
+    ASSISTANT_RECALL_QUERY,
     UNKNOWN
 }
 
@@ -115,10 +119,10 @@ data class ConversationMessage(
     val timestamp: Long = System.currentTimeMillis(),
     val role: MessageRole,
     val rawText: String,
-    val normalizedText: String,
+    var normalizedText: String,
     var intent: IntentType = IntentType.UNKNOWN,
     var response: String? = null,
-    val relatedRequestId: Long? = null
+    var relatedRequestId: Long? = null
 )
 
 enum class ResponseType {

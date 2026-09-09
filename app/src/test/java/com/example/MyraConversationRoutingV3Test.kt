@@ -379,4 +379,158 @@ class MyraConversationRoutingV3Test {
         val statusClass = IntentClassifier.classify(statusNorm, statusInput)
         assertEquals(IntentType.EXECUTION_STATUS_QUERY, statusClass.intent)
     }
+
+    // ------------------------------------------------------------------------
+    // REGRESSION TEST 1: hii -> tum kon ho -> mene kya bola (Expects: "tum kon ho")
+    // ------------------------------------------------------------------------
+    @Test
+    fun testRegression1_Hii_TumKonHo_MeneKyaBola() {
+        val context = ConversationContext()
+
+        // 1. "hii"
+        context.recordUserMessage("hii")
+        val hiiReply = "नमस्ते! मैं यहाँ हूँ। बताइए, क्या करना है?"
+        context.recordAssistantResponse(hiiReply, intent = IntentType.GREETING)
+
+        // 2. "tum kon ho" -> classified as IDENTITY_QUESTION
+        val identityRaw = "tum kon ho"
+        val identityNorm = TextNormalizer.normalize(identityRaw)
+        val identityClass = IntentClassifier.classify(identityNorm, identityRaw)
+        assertEquals(IntentType.IDENTITY_QUESTION, identityClass.intent)
+
+        val localIdentityResult = parser.parse(identityRaw)
+        assertTrue(localIdentityResult.handled)
+        assertEquals(IntentType.IDENTITY_QUESTION, localIdentityResult.intent?.type)
+
+        context.recordUserMessage(identityRaw)
+        val identityReply = responseEngine.generateIdentityResponse(100L).text
+        assertTrue(identityReply.contains("Myra"))
+        context.recordAssistantResponse(identityReply, intent = IntentType.IDENTITY_QUESTION)
+
+        // 3. "mene kya bola"
+        val recallRaw = "mene kya bola"
+        val recallNorm = TextNormalizer.normalize(recallRaw)
+        val recallClass = IntentClassifier.classify(recallNorm, recallRaw)
+        assertEquals(IntentType.RECALL_REQUEST, recallClass.intent)
+
+        val localRecallResult = parser.parse(recallRaw)
+        assertTrue(localRecallResult.handled)
+        assertTrue(
+            localRecallResult.intent?.type == IntentType.RECALL_RECENT_REQUESTS ||
+            localRecallResult.intent?.type == IntentType.RECALL_REQUEST
+        )
+
+        context.recordUserMessage(recallRaw)
+        val recallReply = context.formatPreviousUserMessageResponse()
+
+        // MUST recall "tum kon ho", and NOT "हाल ही में कोई कमांड रिकॉर्ड नहीं हुआ है।"
+        assertFalse("Must NOT say no command recorded", recallReply.contains("कोई कमांड रिकॉर्ड नहीं"))
+        assertTrue("Must recall 'tum kon ho': $recallReply", recallReply.contains("tum kon ho"))
+        assertTrue("Must use 'पूछा': $recallReply", recallReply.contains("पूछा"))
+    }
+
+    // ------------------------------------------------------------------------
+    // REGRESSION TEST 2: api key lgi ya nhi -> mene kya pucha (Expects: "api key lgi ya nhi")
+    // ------------------------------------------------------------------------
+    @Test
+    fun testRegression2_ApiKey_MeneKyaPucha() {
+        val context = ConversationContext()
+
+        // 1. "api key lgi ya nhi"
+        val q = "api key lgi ya nhi"
+        context.recordUserMessage(q)
+        val reply = responseEngine.generateApiKeyStatusResponse(ApiKeyStatus.NOT_CONFIGURED)
+        context.recordAssistantResponse(reply, intent = IntentType.API_KEY_STATUS_QUERY)
+
+        // 2. "mene kya pucha"
+        val puchaRaw = "mene kya pucha"
+        val puchaNorm = TextNormalizer.normalize(puchaRaw)
+        val puchaClass = IntentClassifier.classify(puchaNorm, puchaRaw)
+        assertEquals(IntentType.CONTEXT_QUERY, puchaClass.intent)
+
+        context.recordUserMessage(puchaRaw)
+        val puchaReply = context.formatPreviousUserQuestionResponse()
+
+        assertFalse("Must NOT say no command recorded", puchaReply.contains("कोई कमांड रिकॉर्ड नहीं"))
+        assertTrue("Must recall 'api key lgi ya nhi': $puchaReply", puchaReply.contains("api key lgi ya nhi"))
+        assertTrue("Must use 'पूछा': $puchaReply", puchaReply.contains("पूछा"))
+    }
+
+    // ------------------------------------------------------------------------
+    // REGRESSION TEST 3: youtube par desi gamer ka video play kro -> tumne kya kiya (Expects: ExecutionHistory report)
+    // ------------------------------------------------------------------------
+    @Test
+    fun testRegression3_Command_TumneKyaKiya() {
+        val recentRequestContext = RecentRequestContext()
+
+        val cmd = "youtube par desi gamer ka video play kro"
+        recentRequestContext.recordNewRequest(
+            requestId = 1L,
+            rawCommand = cmd,
+            normalizedCommand = TextNormalizer.normalize(cmd),
+            intent = com.example.models.ParsedIntent(type = IntentType.SEARCH_AND_PLAY, app = "YouTube", query = "desi gamer"),
+            targetApp = "YouTube",
+            query = "desi gamer"
+        )
+        recentRequestContext.updateRequestState(
+            requestId = 1L,
+            state = com.example.models.RequestState.SUCCESS,
+            result = com.example.models.RequestResult(
+                requestId = 1L,
+                state = com.example.models.RequestState.SUCCESS,
+                summary = "YouTube पर Desi Gamer का वीडियो चलने की पुष्टि हो गई।",
+                isVerified = true
+            )
+        )
+
+        val reportQuery = "tumne kya kiya"
+        val reportClass = IntentClassifier.classify(TextNormalizer.normalize(reportQuery), reportQuery)
+        assertEquals(IntentType.EXECUTION_STATUS_QUERY, reportClass.intent)
+
+        val report = recentRequestContext.formatLastExecutionReport()
+        assertFalse("Must not say no command executed", report.contains("हाल ही में कोई कमांड रिकॉर्ड नहीं हुआ"))
+        assertTrue("Must report YouTube execution: $report", report.contains("YouTube", ignoreCase = true) || report.contains("Desi Gamer", ignoreCase = true))
+    }
+
+    // ------------------------------------------------------------------------
+    // REGRESSION TEST 4: youtube par desi gamer ka video play kro -> nahi hua (Expects: FAILURE_FEEDBACK)
+    // ------------------------------------------------------------------------
+    @Test
+    fun testRegression4_Command_NahiHua() {
+        val raw = "nahi hua"
+        val norm = TextNormalizer.normalize(raw)
+        val classification = IntentClassifier.classify(norm, raw)
+        assertEquals(IntentType.FAILURE_FEEDBACK, classification.intent)
+        assertEquals(MessageCategory.FAILURE_FEEDBACK, classification.category)
+
+        val localResult = parser.parse(raw)
+        assertTrue(localResult.handled)
+        assertEquals(MessageCategory.FAILURE_FEEDBACK, localResult.category)
+    }
+
+    // ------------------------------------------------------------------------
+    // REGRESSION TEST 5: tumne kya bola -> Assistant recall
+    // ------------------------------------------------------------------------
+    @Test
+    fun testRegression5_TumneKyaBola_AssistantRecall() {
+        val context = ConversationContext()
+
+        context.recordUserMessage("hii")
+        val assistantReply = "नमस्ते! मैं यहाँ हूँ। बताइए, क्या करना है?"
+        context.recordAssistantResponse(assistantReply, intent = IntentType.GREETING)
+
+        val recallRaw = "tumne kya bola"
+        val recallNorm = TextNormalizer.normalize(recallRaw)
+        val recallClass = IntentClassifier.classify(recallNorm, recallRaw)
+        assertEquals(IntentType.ASSISTANT_RECALL_QUERY, recallClass.intent)
+        assertEquals(MessageCategory.ASSISTANT_RECALL_QUERY, recallClass.category)
+
+        val localResult = parser.parse(recallRaw)
+        assertTrue(localResult.handled)
+        assertEquals(IntentType.ASSISTANT_RECALL_QUERY, localResult.intent?.type)
+
+        context.recordUserMessage(recallRaw)
+        val reply = context.formatPreviousAssistantMessageResponse()
+        assertTrue("Must recall assistant response: $reply", reply.contains("नमस्ते") || reply.contains("कहा था"))
+    }
 }
